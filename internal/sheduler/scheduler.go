@@ -37,15 +37,25 @@ func (scheduler Scheduler) startDueJobs(ctx context.Context) {
 				}).Error("Error acquiring due jobs")
 			} else {
 				for _, job := range dueJobs {
+					err = scheduler.storage.MarkJobRunning(ctx, job)
+					if err != nil {
+						log.WithFields(log.Fields{
+							"error": err,
+							"job":   job,
+						}).Error("Error signalling job running")
+						continue
+					}
+
 					timeoutCtx, cancel := context.WithTimeout(ctx, job.Timeout)
 					err = exec.CommandContext(timeoutCtx, job.ScriptPath).Run()
 					cancel()
 					if err != nil {
 						log.WithFields(log.Fields{
-							"error":      err,
-							"scriptPath": job.ScriptPath,
+							"error": err,
+							"job":   job,
 						}).Error("Error executing job")
 					}
+
 					scheduler.doneChannel <- job
 				}
 			}

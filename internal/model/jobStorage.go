@@ -28,5 +28,6 @@ type JobDTO struct {
 type JobStorage interface {
 	CreateJob(ctx context.Context, name, crontabString, scriptPath string, timeout time.Duration) (JobId, error)
 	FindDueJobs(ctx context.Context) ([]Job, error)
+	MarkJobRunning(ctx context.Context, job Job) error
 	MarkJobDone(ctx context.Context, job Job) error
 }

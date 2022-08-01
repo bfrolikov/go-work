@@ -11,6 +11,7 @@ import (
 const (
 	newJobQuery              = "INSERT INTO jobs (name, crontabString, scriptPath, timeout, nextExecutionTime) values ($1, $2, $3, $4, $5) RETURNING id"
 	findDueQuery             = "SELECT * FROM jobs WHERE nextExecutionTime <= $1 AND not running"
+	markRunningQuery         = "UPDATE jobs SET running = true WHERE id = $1"
 	markDoneQuery            = "UPDATE jobs SET nextExecutionTime = $1, running = false WHERE id = $2"
 	databaseOperationTimeout = time.Second
 )
@@ -104,6 +105,17 @@ func (storage SQLJobStorage) FindDueJobs(ctx context.Context) ([]Job, error) {
 	return dueJobs, nil
 }
 
+func (storage SQLJobStorage) MarkJobRunning(ctx context.Context, job Job) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
+	defer cancel()
+
+	storage.rwLock.Lock()
+	_, err := storage.database.ExecContext(timeoutCtx, markRunningQuery, job.Id)
+	storage.rwLock.Unlock()
+
+	return err
+}
+
 func (storage SQLJobStorage) MarkJobDone(ctx context.Context, job Job) error {
 	schedule, err := cron.ParseStandard(job.CrontabString)
 	if err != nil {
@@ -117,9 +129,5 @@ func (storage SQLJobStorage) MarkJobDone(ctx context.Context, job Job) error {
 	_, err = storage.database.ExecContext(timeoutCtx, markDoneQuery, schedule.Next(time.Now()), job.Id)
 	storage.rwLock.Unlock()
 
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return err
 }
