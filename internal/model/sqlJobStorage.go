@@ -10,6 +10,9 @@ import (
 
 const (
 	newJobQuery              = "INSERT INTO jobs (name, crontabString, scriptPath, timeout, nextExecutionTime) values ($1, $2, $3, $4, $5) RETURNING id"
+	getJobQuery              = "SELECT * FROM jobs WHERE id = $1"
+	deleteJobQuery           = "DELETE FROM jobs WHERE id = $1"
+	getJobByNameQuery        = "SELECT * FROM jobs WHERE name = $1"
 	findDueQuery             = "SELECT * FROM jobs WHERE nextExecutionTime <= $1 AND not running"
 	markRunningQuery         = "UPDATE jobs SET running = true WHERE id = $1"
 	markDoneQuery            = "UPDATE jobs SET nextExecutionTime = $1, running = false WHERE id = $2"
@@ -45,9 +48,17 @@ func (storage SQLJobStorage) CreateJob(ctx context.Context, name, crontabString,
 	timeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
 	defer cancel()
 
-	var id JobId
 	storage.rwLock.Lock()
-	err = storage.database.QueryRowContext(
+	defer storage.rwLock.Unlock()
+
+	tx, err := storage.database.BeginTx(timeoutCtx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+
+	var id JobId
+	err = tx.QueryRowContext(
 		timeoutCtx,
 		newJobQuery,
 		name,
@@ -56,22 +67,43 @@ func (storage SQLJobStorage) CreateJob(ctx context.Context, name, crontabString,
 		timeout,
 		schedule.Next(time.Now()),
 	).Scan(&id)
-	storage.rwLock.Unlock()
-
 	if err != nil {
+		return 0, err
+	}
+
+	if err = tx.Commit(); err != nil {
 		return 0, err
 	}
 
 	return id, nil
 }
 
+func (storage SQLJobStorage) GetJob(ctx context.Context, id JobId) (Job, error) {
+	return storage.getJobBy(ctx, getJobQuery, id)
+}
+
+func (storage SQLJobStorage) DeleteJob(ctx context.Context, id JobId) error {
+	timeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
+	defer cancel()
+
+	storage.rwLock.Lock()
+	_, err := storage.database.ExecContext(timeoutCtx, deleteJobQuery, id)
+	storage.rwLock.Unlock()
+
+	return err
+}
+
+func (storage SQLJobStorage) GetJobByName(ctx context.Context, name string) (Job, error) {
+	return storage.getJobBy(ctx, getJobByNameQuery, name)
+}
+
 func (storage SQLJobStorage) FindDueJobs(ctx context.Context) ([]Job, error) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
 	defer cancel()
 
-	storage.rwLock.RLock()
+	storage.rwLock.Lock() //Lock is intentional to prevent multiple schedulers from starting the same jobs
 	rows, err := storage.database.QueryContext(timeoutCtx, findDueQuery, time.Now())
-	storage.rwLock.RUnlock()
+	storage.rwLock.Unlock()
 
 	if err != nil {
 		return nil, err
@@ -81,15 +113,7 @@ func (storage SQLJobStorage) FindDueJobs(ctx context.Context) ([]Job, error) {
 	dueJobs := make([]Job, 0)
 	for rows.Next() {
 		var dueJob Job
-		err = rows.Scan(
-			&dueJob.Id,
-			&dueJob.Name,
-			&dueJob.CrontabString,
-			&dueJob.ScriptPath,
-			&dueJob.Timeout,
-			&dueJob.nextExecutionTime,
-			&dueJob.running,
-		)
+		err = scanJob(rows, &dueJob)
 		if err != nil {
 			return nil, err
 		}
@@ -106,14 +130,7 @@ func (storage SQLJobStorage) FindDueJobs(ctx context.Context) ([]Job, error) {
 }
 
 func (storage SQLJobStorage) MarkJobRunning(ctx context.Context, job Job) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
-	defer cancel()
-
-	storage.rwLock.Lock()
-	_, err := storage.database.ExecContext(timeoutCtx, markRunningQuery, job.Id)
-	storage.rwLock.Unlock()
-
-	return err
+	return storage.updateJobs(ctx, markRunningQuery, job.Id)
 }
 
 func (storage SQLJobStorage) MarkJobDone(ctx context.Context, job Job) error {
@@ -122,11 +139,47 @@ func (storage SQLJobStorage) MarkJobDone(ctx context.Context, job Job) error {
 		return err
 	}
 
+	return storage.updateJobs(ctx, markDoneQuery, schedule.Next(time.Now()), job.Id)
+}
+
+type scanable interface {
+	Scan(dest ...any) error
+}
+
+func scanJob(rowToScan scanable, job *Job) error {
+	return rowToScan.Scan(
+		&job.Id,
+		&job.Name,
+		&job.CrontabString,
+		&job.ScriptPath,
+		&job.Timeout,
+		&job.nextExecutionTime,
+		&job.running,
+	)
+}
+
+func (storage SQLJobStorage) getJobBy(ctx context.Context, query string, params ...any) (Job, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
+	defer cancel()
+
+	storage.rwLock.RLock()
+	row := storage.database.QueryRowContext(timeoutCtx, query, params)
+	storage.rwLock.RUnlock()
+
+	var job Job
+	err := scanJob(row, &job)
+	if err != nil {
+		return Job{}, err
+	}
+	return job, nil
+}
+
+func (storage SQLJobStorage) updateJobs(ctx context.Context, query string, params ...any) error {
 	timeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
 	defer cancel()
 
 	storage.rwLock.Lock()
-	_, err = storage.database.ExecContext(timeoutCtx, markDoneQuery, schedule.Next(time.Now()), job.Id)
+	_, err := storage.database.ExecContext(timeoutCtx, query, params)
 	storage.rwLock.Unlock()
 
 	return err

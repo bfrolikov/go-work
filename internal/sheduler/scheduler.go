@@ -14,7 +14,7 @@ type Scheduler struct {
 	doneChannel  chan model.Job
 }
 
-func NewScheduler(storage model.JobStorage, pingInterval time.Duration) Scheduler {
+func New(storage model.JobStorage, pingInterval time.Duration) Scheduler {
 	return Scheduler{storage, pingInterval, make(chan model.Job)}
 }
 
