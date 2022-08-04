@@ -22,7 +22,6 @@ type JobStorage interface {
 	GetJob(ctx context.Context, id JobId) (Job, error)
 	DeleteJob(ctx context.Context, id JobId) error
 	GetJobByName(ctx context.Context, name string) (Job, error)
-	FindDueJobs(ctx context.Context) ([]Job, error)
-	MarkJobRunning(ctx context.Context, job Job) error
+	MarkDueJobsRunning(ctx context.Context) ([]Job, error)
 	MarkJobDone(ctx context.Context, job Job) error
 }

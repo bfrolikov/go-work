@@ -5,6 +5,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"go-work/internal/model"
 	"os/exec"
+	"sync"
 	"time"
 )
 
@@ -12,51 +13,44 @@ type Scheduler struct {
 	storage      model.JobStorage
 	pingInterval time.Duration
 	doneChannel  chan model.Job
+	stopWg       *sync.WaitGroup
 }
 
 func New(storage model.JobStorage, pingInterval time.Duration) Scheduler {
-	return Scheduler{storage, pingInterval, make(chan model.Job)}
+	sched := Scheduler{storage, pingInterval, make(chan model.Job), &sync.WaitGroup{}}
+	sched.stopWg.Add(2)
+	return sched
 }
 
 func (scheduler Scheduler) Start(ctx context.Context) {
 	go scheduler.startDueJobs(ctx)
 	go scheduler.monitorDone(ctx)
-	<-ctx.Done()
+	scheduler.stopWg.Wait()
 }
 
 func (scheduler Scheduler) startDueJobs(ctx context.Context) {
+	defer scheduler.stopWg.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			dueJobs, err := scheduler.storage.FindDueJobs(ctx)
+			jobs, err := scheduler.storage.MarkDueJobsRunning(ctx)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"error": err,
-				}).Error("Error acquiring due jobs")
-			} else {
-				for _, job := range dueJobs {
-					err = scheduler.storage.MarkJobRunning(ctx, job)
-					if err != nil {
-						log.WithFields(log.Fields{
-							"error": err,
-							"job":   job,
-						}).Error("Error signalling job running")
-						continue
-					}
+				}).Error("Error marking due jobs running")
+			}
 
-					timeoutCtx, cancel := context.WithTimeout(ctx, job.Timeout)
-					err = exec.CommandContext(timeoutCtx, job.ScriptPath).Run()
-					cancel()
-					if err != nil {
-						log.WithFields(log.Fields{
-							"error": err,
-							"job":   job,
-						}).Error("Error executing job")
-					}
-
-					scheduler.doneChannel <- job
+			for _, job := range jobs {
+				timeoutCtx, cancel := context.WithTimeout(ctx, job.Timeout)
+				err = exec.CommandContext(timeoutCtx, job.ScriptPath).Run()
+				cancel()
+				if err != nil {
+					log.WithFields(log.Fields{
+						"error": err,
+						"job":   job,
+					}).Error("Error executing job")
 				}
 			}
 			time.Sleep(scheduler.pingInterval)
@@ -65,6 +59,7 @@ func (scheduler Scheduler) startDueJobs(ctx context.Context) {
 }
 
 func (scheduler Scheduler) monitorDone(ctx context.Context) {
+	defer scheduler.stopWg.Done()
 	for {
 		select {
 		case job := <-scheduler.doneChannel:
