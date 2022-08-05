@@ -45,34 +45,27 @@ func (storage SQLJobStorage) CreateJob(ctx context.Context, name, crontabString,
 		return 0, err
 	}
 
-	storage.rwLock.Lock()
-	defer storage.rwLock.Unlock()
-
-	txTimeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
-	defer cancel()
-	tx, err := storage.database.BeginTx(txTimeoutCtx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-
-	queryTimeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
-	defer cancel()
 	var id JobId
-	err = tx.QueryRowContext(
-		queryTimeoutCtx,
-		newJobQuery,
-		name,
-		crontabString,
-		scriptPath,
-		timeout,
-		schedule.Next(time.Now()),
-	).Scan(&id)
-	if err != nil {
-		return 0, err
+	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
+		queryTimeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
+		defer cancel()
+		err = tx.QueryRowContext(
+			queryTimeoutCtx,
+			newJobQuery,
+			name,
+			crontabString,
+			scriptPath,
+			timeout,
+			schedule.Next(time.Now()),
+		).Scan(&id)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	}
 
-	if err = tx.Commit(); err != nil {
+	if err = storage.transact(ctx, transactionFunc); err != nil {
 		return 0, err
 	}
 
@@ -84,14 +77,7 @@ func (storage SQLJobStorage) GetJob(ctx context.Context, id JobId) (Job, error) 
 }
 
 func (storage SQLJobStorage) DeleteJob(ctx context.Context, id JobId) error {
-	storage.rwLock.Lock()
-	defer storage.rwLock.Unlock()
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
-	defer cancel()
-	_, err := storage.database.ExecContext(timeoutCtx, deleteJobQuery, id)
-
-	return err
+	return storage.updateJobs(ctx, deleteJobQuery, id)
 }
 
 func (storage SQLJobStorage) GetJobByName(ctx context.Context, name string) (Job, error) {
@@ -99,41 +85,41 @@ func (storage SQLJobStorage) GetJobByName(ctx context.Context, name string) (Job
 }
 
 func (storage SQLJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) {
-	storage.rwLock.Lock()
-	defer storage.rwLock.Unlock()
-
-	txTimeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
-	defer cancel()
-	tx, err := storage.database.BeginTx(txTimeoutCtx, nil)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	queryTimeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
-	defer cancel()
-	rows, err := tx.QueryContext(queryTimeoutCtx, markDueJobsRunningQuery, time.Now())
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	jobs := make([]Job, 0)
-	for rows.Next() {
-		var job Job
-		err = scanJob(rows, &job)
+	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
+		queryTimeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
+		defer cancel()
+		rows, err := tx.QueryContext(queryTimeoutCtx, markDueJobsRunningQuery, time.Now())
 		if err != nil {
-			return nil, err
+			return err
 		}
-		jobs = append(jobs, job)
+		defer rows.Close()
+
+		for rows.Next() {
+			var job Job
+			err = scanJob(rows, &job)
+			if err != nil {
+				return err
+			}
+			jobs = append(jobs, job)
+		}
+
+		if err = rows.Close(); err != nil {
+			return err
+		}
+
+		if err = tx.Commit(); err != nil {
+			return err
+		}
+
+		return nil
 	}
 
-	if err = tx.Commit(); err != nil {
+	if err := storage.transact(ctx, transactionFunc); err != nil {
 		return nil, err
 	}
 
 	return jobs, nil
-
 }
 
 func (storage SQLJobStorage) MarkJobDone(ctx context.Context, job Job) error {
@@ -185,4 +171,24 @@ func (storage SQLJobStorage) updateJobs(ctx context.Context, query string, param
 	_, err := storage.database.ExecContext(timeoutCtx, query, params)
 
 	return err
+}
+
+func (storage SQLJobStorage) transact(ctx context.Context, fn func(context.Context, *sql.Tx) error) error {
+	storage.rwLock.Lock()
+	defer storage.rwLock.Unlock()
+
+	txTimeoutCtx, cancel := context.WithTimeout(ctx, databaseOperationTimeout)
+	defer cancel()
+	tx, err := storage.database.BeginTx(txTimeoutCtx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	err = fn(ctx, tx)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }
