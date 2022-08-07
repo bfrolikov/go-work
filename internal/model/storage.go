@@ -13,8 +13,6 @@ type Job struct {
 	CrontabString     string
 	ScriptPath        string
 	Timeout           time.Duration
-	nextExecutionTime time.Time
-	running           bool
 }
 
 type JobStorage interface {
