@@ -1,4 +1,4 @@
-package sheduler
+package scheduler
 
 import (
 	"context"
@@ -17,25 +17,25 @@ type Scheduler struct {
 }
 
 func New(storage model.JobStorage, pingInterval time.Duration) Scheduler {
-	sched := Scheduler{storage, pingInterval, make(chan model.Job), &sync.WaitGroup{}}
-	sched.stopWg.Add(2)
-	return sched
+	skd := Scheduler{storage, pingInterval, make(chan model.Job), &sync.WaitGroup{}}
+	skd.stopWg.Add(2)
+	return skd
 }
 
-func (scheduler Scheduler) Start(ctx context.Context) {
-	go scheduler.startDueJobs(ctx)
-	go scheduler.monitorDone(ctx)
-	scheduler.stopWg.Wait()
+func (skd Scheduler) Start(ctx context.Context) {
+	go skd.startDueJobs(ctx)
+	go skd.monitorDone(ctx)
+	skd.stopWg.Wait()
 }
 
-func (scheduler Scheduler) startDueJobs(ctx context.Context) {
-	defer scheduler.stopWg.Done()
+func (skd Scheduler) startDueJobs(ctx context.Context) {
+	defer skd.stopWg.Done()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
-			jobs, err := scheduler.storage.MarkDueJobsRunning(ctx)
+		case <-time.After(skd.pingInterval):
+			jobs, err := skd.storage.MarkDueJobsRunning(ctx)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"error": err,
@@ -52,18 +52,25 @@ func (scheduler Scheduler) startDueJobs(ctx context.Context) {
 						"job":   job,
 					}).Error("Error executing job")
 				}
+
+				err = skd.storage.MarkJobDone(ctx, job)
+				if err != nil {
+					log.WithFields(log.Fields{
+						"error": err,
+						"job":   job,
+					}).Error("Error marking job done")
+				}
 			}
-			time.Sleep(scheduler.pingInterval)
 		}
 	}
 }
 
-func (scheduler Scheduler) monitorDone(ctx context.Context) {
-	defer scheduler.stopWg.Done()
+func (skd Scheduler) monitorDone(ctx context.Context) {
+	defer skd.stopWg.Done()
 	for {
 		select {
-		case job := <-scheduler.doneChannel:
-			err := scheduler.storage.MarkJobDone(ctx, job)
+		case job := <-skd.doneChannel:
+			err := skd.storage.MarkJobDone(ctx, job)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"error": err,
