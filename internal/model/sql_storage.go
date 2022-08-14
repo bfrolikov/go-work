@@ -43,20 +43,15 @@ func (st sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, scri
 
 	var id JobId
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
-		processFunc := func(row *sql.Row) error {
-			return row.Scan(&id)
-		}
-		return queryRowTimeout(
+		return tx.QueryRowContext(
 			ctx,
-			tx,
 			sqlquery.NewJob,
-			processFunc,
 			name,
 			crontabString,
 			scriptPath,
 			timeout,
 			schedule.Next(time.Now()),
-		)
+		).Scan(&id)
 	}
 
 	if err = st.transact(ctx, transactionFunc); err != nil {
@@ -81,19 +76,21 @@ func (st sqlJobStorage) GetJobByName(ctx context.Context, name string) (Job, err
 func (st sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) {
 	jobs := make([]Job, 0)
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
-		processFunc := func(rows *sql.Rows) error {
-			for rows.Next() {
-				job := Job{}
-				err := scanJob(rows, &job)
-				if err != nil {
-					return err
-				}
-				jobs = append(jobs, job)
-			}
-			return nil
+		rows, err := tx.QueryContext(ctx, sqlquery.MarkDueJobsRunning, time.Now())
+		if err != nil {
+			return err
 		}
+		defer rows.Close()
 
-		return queryTimeout(ctx, tx, sqlquery.MarkDueJobsRunning, processFunc, time.Now())
+		for rows.Next() {
+			job := Job{}
+			err := scanJob(rows, &job)
+			if err != nil {
+				return err
+			}
+			jobs = append(jobs, job)
+		}
+		return rows.Close()
 	}
 
 	if err := st.transact(ctx, transactionFunc); err != nil {
@@ -125,62 +122,14 @@ func scanJob(sc scanner, job *Job) error {
 	)
 }
 
-type contextQueryRunner interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
-func execTimeout(ctx context.Context, runner contextQueryRunner, query string, args ...any) (sql.Result, error) {
-	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
-	defer cancel()
-	return runner.ExecContext(timeoutCtx, query, args...)
-}
-
-func queryRowTimeout(
-	ctx context.Context,
-	runner contextQueryRunner,
-	query string,
-	processFunc func(*sql.Row) error,
-	args ...any,
-) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
-	defer cancel()
-	return processFunc(runner.QueryRowContext(timeoutCtx, query, args...))
-}
-
-func queryTimeout(
-	ctx context.Context,
-	runner contextQueryRunner,
-	query string,
-	processFunc func(*sql.Rows) error,
-	args ...any,
-) error {
-	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
-	defer cancel()
-	rows, err := runner.QueryContext(timeoutCtx, query, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-
-	err = processFunc(rows)
-	if err != nil {
-		return err
-	}
-	return rows.Close()
-}
-
 func (st sqlJobStorage) getJobBy(ctx context.Context, query string, params ...any) (Job, error) {
-	job := Job{}
-	processFunc := func(row *sql.Row) error {
-		return scanJob(row, &job)
-	}
-
 	st.rwLock.RLock()
-	err := queryRowTimeout(ctx, st.database, query, processFunc, params...)
-	st.rwLock.RUnlock()
+	defer st.rwLock.RUnlock()
 
+	job := Job{}
+	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
+	defer cancel()
+	err := scanJob(st.database.QueryRowContext(timeoutCtx, query, params...), &job)
 	if err != nil {
 		return Job{}, err
 	}
@@ -191,8 +140,9 @@ func (st sqlJobStorage) updateJobs(ctx context.Context, query string, params ...
 	st.rwLock.Lock()
 	defer st.rwLock.Unlock()
 
-	_, err := execTimeout(ctx, st.database, query, params...)
-
+	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
+	defer cancel()
+	_, err := st.database.ExecContext(timeoutCtx, query, params...)
 	return err
 }
 
@@ -200,13 +150,15 @@ func (st sqlJobStorage) transact(ctx context.Context, transactionFunc func(conte
 	st.rwLock.Lock()
 	defer st.rwLock.Unlock()
 
-	tx, err := st.database.BeginTx(context.Background(), nil)
+	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
+	defer cancel()
+	tx, err := st.database.BeginTx(timeoutCtx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	err = transactionFunc(ctx, tx)
+	err = transactionFunc(timeoutCtx, tx)
 	if err != nil {
 		return err
 	}
@@ -215,34 +167,37 @@ func (st sqlJobStorage) transact(ctx context.Context, transactionFunc func(conte
 
 func (st sqlJobStorage) init(ctx context.Context) error {
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
-		_, err := execTimeout(ctx, tx, sqlquery.ResetState)
+		_, err := tx.ExecContext(ctx, sqlquery.ResetState)
 		if err != nil {
 			return err
 		}
 
-		done := false
-		for !done {
-			jobs := make([]Job, 0)
-			fetchJobs := func(rows *sql.Rows) error {
-				if !rows.Next() {
-					done = true
-					return nil
-				}
-				for {
-					job := Job{}
-					if err := scanJob(rows, &job); err != nil {
-						return err
-					}
-					jobs = append(jobs, job)
-					if !rows.Next() {
-						break
-					}
-				}
-				return nil
-			}
-			err = queryTimeout(ctx, tx, sqlquery.FindNullNextExecutionTime, fetchJobs)
+		for {
+			rows, err := tx.QueryContext(ctx, sqlquery.FindNullNextExecutionTime)
 			if err != nil {
 				return err
+			}
+			if !rows.Next() {
+				break
+			}
+
+			jobs := make([]Job, 0)
+			for {
+				job := Job{}
+				if err := scanJob(rows, &job); err != nil {
+					break
+				}
+				jobs = append(jobs, job)
+				if !rows.Next() {
+					break
+				}
+			}
+			closeError := rows.Close()
+			if err = rows.Err(); err != nil {
+				return err
+			}
+			if closeError != nil {
+				return closeError
 			}
 
 			for _, job := range jobs {
@@ -250,7 +205,7 @@ func (st sqlJobStorage) init(ctx context.Context) error {
 				if err != nil {
 					return err
 				}
-				_, err = execTimeout(ctx, tx, sqlquery.SetNextExecutionTime, schedule.Next(time.Now()), job.Id)
+				_, err = tx.ExecContext(ctx, sqlquery.SetNextExecutionTime, schedule.Next(time.Now()), job.Id)
 				if err != nil {
 					return err
 				}

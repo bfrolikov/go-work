@@ -12,5 +12,5 @@ const (
 	ResetState                = "UPDATE jobs SET nextExecutionTime = NULL, running = false"
 	FindNullNextExecutionTime = "SELECT id, name, crontabString, scriptPath, timeout FROM jobs WHERE nextExecutionTime IS NULL LIMIT 100"
 	SetNextExecutionTime      = "UPDATE jobs SET nextExecutionTime = $1 WHERE id = $2"
-	DatabaseOperationTimeout  = time.Second * 5
+	DatabaseOperationTimeout  = time.Second * 30
 )
