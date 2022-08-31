@@ -3,6 +3,8 @@ package model
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"github.com/robfig/cron/v3"
 	"go-work/internal/model/sqlquery"
 	"sync"
@@ -14,28 +16,26 @@ type sqlJobStorage struct {
 	rwLock   *sync.RWMutex
 }
 
-func NewSQLJobStorage(ctx context.Context, driverName, dataSourceName string) (sqlJobStorage, error) {
+func NewSQLJobStorage(ctx context.Context, driverName, dataSourceName string) (*sqlJobStorage, error) {
 	database, err := sql.Open(driverName, dataSourceName)
 	if err != nil {
-		return sqlJobStorage{}, err
+		return nil, err
 	}
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
-	defer cancel()
-	if err = database.PingContext(timeoutCtx); err != nil {
+	if err = database.PingContext(ctx); err != nil {
 		database.Close()
-		return sqlJobStorage{}, err
+		return nil, err
 	}
 
 	storage := sqlJobStorage{database, &sync.RWMutex{}}
 	if err = storage.init(ctx); err != nil {
 		database.Close()
-		return sqlJobStorage{}, err
+		return nil, err
 	}
-	return storage, nil
+	return &storage, nil
 }
 
-func (st sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, scriptPath string, timeout time.Duration) (JobId, error) {
+func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, scriptPath string, timeout time.Duration) (JobId, error) {
 	schedule, err := cron.ParseStandard(crontabString)
 	if err != nil {
 		return 0, err
@@ -61,19 +61,19 @@ func (st sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, scri
 	return id, nil
 }
 
-func (st sqlJobStorage) GetJob(ctx context.Context, id JobId) (Job, error) {
+func (st *sqlJobStorage) GetJob(ctx context.Context, id JobId) (Job, error) {
 	return st.getJobBy(ctx, sqlquery.GetJob, id)
 }
 
-func (st sqlJobStorage) DeleteJob(ctx context.Context, id JobId) error {
+func (st *sqlJobStorage) DeleteJob(ctx context.Context, id JobId) error {
 	return st.updateJobs(ctx, sqlquery.DeleteJob, id)
 }
 
-func (st sqlJobStorage) GetJobByName(ctx context.Context, name string) (Job, error) {
+func (st *sqlJobStorage) GetJobByName(ctx context.Context, name string) (Job, error) {
 	return st.getJobBy(ctx, sqlquery.GetJobByName, name)
 }
 
-func (st sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) {
+func (st *sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) {
 	jobs := make([]Job, 0)
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, sqlquery.MarkDueJobsRunning, time.Now())
@@ -99,7 +99,7 @@ func (st sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) {
 	return jobs, nil
 }
 
-func (st sqlJobStorage) MarkJobDone(ctx context.Context, job Job) error {
+func (st *sqlJobStorage) MarkJobDone(ctx context.Context, job Job) error {
 	schedule, err := cron.ParseStandard(job.CrontabString)
 	if err != nil {
 		return err
@@ -122,50 +122,47 @@ func scanJob(sc scanner, job *Job) error {
 	)
 }
 
-func (st sqlJobStorage) getJobBy(ctx context.Context, query string, params ...any) (Job, error) {
+func (st *sqlJobStorage) getJobBy(ctx context.Context, query string, params ...any) (Job, error) {
 	st.rwLock.RLock()
 	defer st.rwLock.RUnlock()
 
 	job := Job{}
-	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
-	defer cancel()
-	err := scanJob(st.database.QueryRowContext(timeoutCtx, query, params...), &job)
+	err := scanJob(st.database.QueryRowContext(ctx, query, params...), &job)
 	if err != nil {
-		return Job{}, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return Job{}, ErrorNotFound
+		}
+		return Job{}, fmt.Errorf("failed getting job: %w", err)
 	}
 	return job, nil
 }
 
-func (st sqlJobStorage) updateJobs(ctx context.Context, query string, params ...any) error {
+func (st *sqlJobStorage) updateJobs(ctx context.Context, query string, params ...any) error {
 	st.rwLock.Lock()
 	defer st.rwLock.Unlock()
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
-	defer cancel()
-	_, err := st.database.ExecContext(timeoutCtx, query, params...)
+	_, err := st.database.ExecContext(ctx, query, params...)
 	return err
 }
 
-func (st sqlJobStorage) transact(ctx context.Context, transactionFunc func(context.Context, *sql.Tx) error) error {
+func (st *sqlJobStorage) transact(ctx context.Context, transactionFunc func(context.Context, *sql.Tx) error) error {
 	st.rwLock.Lock()
 	defer st.rwLock.Unlock()
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, sqlquery.DatabaseOperationTimeout)
-	defer cancel()
-	tx, err := st.database.BeginTx(timeoutCtx, nil)
+	tx, err := st.database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
 
-	err = transactionFunc(timeoutCtx, tx)
+	err = transactionFunc(ctx, tx)
 	if err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-func (st sqlJobStorage) init(ctx context.Context) error {
+func (st *sqlJobStorage) init(ctx context.Context) error {
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, sqlquery.ResetState)
 		if err != nil {
