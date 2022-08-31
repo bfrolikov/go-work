@@ -11,8 +11,8 @@ type JobId int64
 type Job struct {
 	Id            JobId         `json:"id"`
 	Name          string        `json:"name"`
-	CrontabString string        `json:"crontab_string"`
-	ScriptPath    string        `json:"script_path"`
+	CrontabString string        `json:"crontabString"`
+	ScriptPath    string        `json:"scriptPath"`
 	Timeout       time.Duration `json:"timeout"`
 }
 

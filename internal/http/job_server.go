@@ -41,9 +41,9 @@ var (
 )
 
 type requestJob struct {
-	Name          string        `json:"name" validate:"required,unique_name"`
-	CrontabString string        `json:"crontab_string" validate:"required,crontab_string"`
-	ScriptPath    string        `json:"script_path" validate:"required,file"`
+	Name          string        `json:"name" validate:"required,uniqueName"`
+	CrontabString string        `json:"crontabString" validate:"required,crontabString"`
+	ScriptPath    string        `json:"scriptPath" validate:"required,file"`
 	Timeout       time.Duration `json:"timeout" validate:"required"`
 }
 
@@ -93,7 +93,6 @@ func (js *jobServer) createJobHandler(w http.ResponseWriter, req *http.Request) 
 		createJobErrorHandler.WriteAndLogValidationErrors(
 			w,
 			err.(validator.ValidationErrors),
-			http.StatusBadRequest,
 			log.Fields{"request job": rj},
 		)
 		return
@@ -193,6 +192,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 func NewJobServer(storage model.JobStorage, addr string) (*http.Server, error) {
 	server := jobServer{storage, validator.New()}
 	err := validation.RegisterJobValidation(server.validate, storage)
+	//TODO: RegisterTagNameFunc
 	if err != nil {
 		return nil, err
 	}

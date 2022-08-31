@@ -37,7 +37,7 @@ func (eh *ErrorHandler) WriteAndLogError(
 		log.WithFields(fields).Debug(logErr)
 		responseErr = logErr.Error()
 	}
-	eh.writeErrorMsg(w, responseErr, statusCode)
+	eh.writeJsonErrorMsg(w, responseErr, statusCode)
 }
 
 func (eh *ErrorHandler) WriteAndLogErrorMsg(
@@ -52,22 +52,32 @@ func (eh *ErrorHandler) WriteAndLogErrorMsg(
 	} else {
 		log.WithFields(fields).Debug(msg)
 	}
-	eh.writeErrorMsg(w, msg, statusCode)
+	eh.writeJsonErrorMsg(w, msg, statusCode)
 }
 
 func (eh *ErrorHandler) WriteAndLogValidationErrors(
 	w http.ResponseWriter,
 	err validator.ValidationErrors,
-	statusCode int,
 	fields log.Fields,
 ) {
-	eh.writeErrorMsg(w, "validation error", http.StatusBadRequest)
-	//TODO
+	fields["endpoint"] = eh.endpoint
+	fieldErrors := make(map[string]string)
+	for _, fieldError := range err {
+		fieldErrors[fieldError.Field()] = fieldError.Error()
+	}
+	fields["field errors"] = fieldErrors
+	log.WithFields(fields).Debug("Received invalid data")
+	resp, _ := json.Marshal(fieldErrors)
+	eh.writeJson(w, resp, http.StatusBadRequest)
 }
 
-func (eh *ErrorHandler) writeErrorMsg(w http.ResponseWriter, msg string, statusCode int) {
-	resp, _ := json.Marshal(jsonError{msg})
+func (eh *ErrorHandler) writeJson(w http.ResponseWriter, jsonMsg []byte, statusCode int) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	w.Write(resp)
+	w.Write(jsonMsg)
+}
+
+func (eh *ErrorHandler) writeJsonErrorMsg(w http.ResponseWriter, msg string, statusCode int) {
+	resp, _ := json.Marshal(jsonError{msg})
+	eh.writeJson(w, resp, statusCode)
 }

@@ -10,7 +10,7 @@ import (
 )
 
 func RegisterJobValidation(validate *validator.Validate, storage model.JobStorage) error {
-	err := validate.RegisterValidationCtx("unique_name", func(ctx context.Context, fl validator.FieldLevel) bool {
+	err := validate.RegisterValidationCtx("uniqueName", func(ctx context.Context, fl validator.FieldLevel) bool {
 		timeoutCtx, cancel := context.WithTimeout(ctx, constants.StorageOperationTimeout)
 		defer cancel()
 		_, err := storage.GetJobByName(timeoutCtx, fl.Field().String())
@@ -23,7 +23,7 @@ func RegisterJobValidation(validate *validator.Validate, storage model.JobStorag
 		return err
 	}
 
-	err = validate.RegisterValidation("crontab_string", func(fl validator.FieldLevel) bool {
+	err = validate.RegisterValidation("crontabString", func(fl validator.FieldLevel) bool {
 		_, err := cron.ParseStandard(fl.Field().String())
 		return err == nil
 	})
