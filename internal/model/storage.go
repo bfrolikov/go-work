@@ -2,18 +2,21 @@ package model
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
 type JobId int64
 
 type Job struct {
-	Id                JobId
-	Name              string
-	CrontabString     string
-	ScriptPath        string
-	Timeout           time.Duration
+	Id            JobId         `json:"id"`
+	Name          string        `json:"name"`
+	CrontabString string        `json:"crontabString"`
+	ScriptPath    string        `json:"scriptPath"`
+	Timeout       time.Duration `json:"timeout"`
 }
+
+var ErrorNotFound = errors.New("job not found")
 
 type JobStorage interface {
 	CreateJob(ctx context.Context, name, crontabString, scriptPath string, timeout time.Duration) (JobId, error)

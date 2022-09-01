@@ -16,19 +16,19 @@ type Scheduler struct {
 	stopWg       *sync.WaitGroup
 }
 
-func New(storage model.JobStorage, pingInterval time.Duration) Scheduler {
+func New(storage model.JobStorage, pingInterval time.Duration) *Scheduler {
 	skd := Scheduler{storage, pingInterval, make(chan model.Job), &sync.WaitGroup{}}
 	skd.stopWg.Add(2)
-	return skd
+	return &skd
 }
 
-func (skd Scheduler) Start(ctx context.Context) {
+func (skd *Scheduler) Start(ctx context.Context) {
 	go skd.startDueJobs(ctx)
 	go skd.monitorDone(ctx)
 	skd.stopWg.Wait()
 }
 
-func (skd Scheduler) startDueJobs(ctx context.Context) {
+func (skd *Scheduler) startDueJobs(ctx context.Context) {
 	defer skd.stopWg.Done()
 	for {
 		select {
@@ -44,6 +44,9 @@ func (skd Scheduler) startDueJobs(ctx context.Context) {
 
 			for _, job := range jobs {
 				timeoutCtx, cancel := context.WithTimeout(ctx, job.Timeout)
+				log.WithFields(log.Fields{
+					"job": job,
+				}).Info("Executing job")
 				err = exec.CommandContext(timeoutCtx, job.ScriptPath).Run()
 				cancel()
 				if err != nil {
@@ -65,7 +68,7 @@ func (skd Scheduler) startDueJobs(ctx context.Context) {
 	}
 }
 
-func (skd Scheduler) monitorDone(ctx context.Context) {
+func (skd *Scheduler) monitorDone(ctx context.Context) {
 	defer skd.stopWg.Done()
 	for {
 		select {
