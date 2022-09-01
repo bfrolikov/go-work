@@ -17,11 +17,12 @@ import (
 )
 
 type Options struct {
-	DbHost    string `short:"u" long:"db-url" description:"Database host url" required:"true"`
-	DbPort    uint   `short:"p" long:"db-port" description:"Database port" default:"5432"`
-	DbUser    string `short:"l" long:"db-login" description:"Database user login" required:"true"`
-	DbName    string `short:"n" long:"db-name" description:"Database name" required:"true"`
-	Intervals []uint `short:"i" long:"intervals" description:"Query intervals for schedulers" required:"true"`
+	ServerPort uint   `long:"server-port" description:"Port for server to listen on" default:"8080"`
+	DbHost     string `long:"db-url" description:"Database host url" required:"true"`
+	DbPort     uint   `long:"db-port" description:"Database port" default:"5432"`
+	DbUser     string `long:"db-login" description:"Database user login" required:"true"`
+	DbName     string `long:"db-name" description:"Database name" required:"true"`
+	Intervals  []uint `long:"interval" description:"Query intervals for schedulers" required:"true"`
 }
 
 const serverShutdownTimeout = 30 * time.Second
@@ -46,7 +47,7 @@ func main() {
 	if err != nil {
 		log.Fatal(fmt.Errorf("could not create job storage: %w", err))
 	}
-	server, err := http.NewJobServer(storage, "localhost:8080")
+	server, err := http.NewJobServer(storage, fmt.Sprintf(":%d", opts.ServerPort))
 	if err != nil {
 		log.Fatal(fmt.Errorf("could not create job server: %w", err))
 	}

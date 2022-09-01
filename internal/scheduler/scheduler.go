@@ -44,6 +44,9 @@ func (skd *Scheduler) startDueJobs(ctx context.Context) {
 
 			for _, job := range jobs {
 				timeoutCtx, cancel := context.WithTimeout(ctx, job.Timeout)
+				log.WithFields(log.Fields{
+					"job": job,
+				}).Info("Executing job")
 				err = exec.CommandContext(timeoutCtx, job.ScriptPath).Run()
 				cancel()
 				if err != nil {

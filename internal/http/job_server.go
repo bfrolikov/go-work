@@ -14,7 +14,9 @@ import (
 	"go-work/internal/model"
 	"mime"
 	"net/http"
+	"reflect"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -192,7 +194,17 @@ func loggingMiddleware(next http.Handler) http.Handler {
 func NewJobServer(storage model.JobStorage, addr string) (*http.Server, error) {
 	server := jobServer{storage, validator.New()}
 	err := validation.RegisterJobValidation(server.validate, storage)
-	//TODO: RegisterTagNameFunc
+	server.validate.RegisterTagNameFunc(func(field reflect.StructField) string {
+		fullJson := field.Tag.Get("json")
+		if fullJson == "-" {
+			return ""
+		}
+		jsonName := strings.SplitN(fullJson, ",", 2)[0]
+		if jsonName != "" {
+			return jsonName
+		}
+		return field.Name
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -204,5 +216,6 @@ func NewJobServer(storage model.JobStorage, addr string) (*http.Server, error) {
 	router.HandleFunc("/api/v1/job/{id:[0-9]+}/", server.deleteJobHandler).Methods("DELETE")
 	router.HandleFunc("/api/v1/job/{name:[a-zA-Z0-9]+}/", server.getJobByNameHandler).Methods("GET")
 	router.Use(loggingMiddleware)
+	router.StrictSlash(true)
 	return &http.Server{Addr: addr, Handler: router}, nil
 }
