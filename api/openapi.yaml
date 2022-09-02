@@ -1,0 +1,160 @@
+openapi: 3.0.3
+info:
+  title: go-work
+  description: A task runner that runs tasks (defined by their script paths) at
+    specified intervals
+  version: 1.0.0
+servers:
+  - url: "{protocol}://{serverHost}/api/v1/"
+    variables:
+      serverHost:
+        description: "Server address"
+        default: "example.com"
+      protocol:
+        enum:
+          - http
+          - https
+        default: https
+tags:
+  - name: job
+    description: "Controlling jobs"
+paths:
+  /job/{id}/:
+    get:
+      tags:
+        - job
+      summary: Get job by id
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            $ref: "#/components/schemas/Id"
+      responses:
+        "200":
+          $ref: "#/components/responses/FoundJob"
+        "404":
+          $ref: "#/components/responses/NotFoundJob"
+    delete:
+      tags:
+        - job
+      summary: Delete job by id
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            $ref: "#/components/schemas/Id"
+      responses:
+        "200":
+          description: "Job was deleted or did not exist"
+  /job/{name}/:
+    get:
+      tags:
+        - job
+      summary: Get job by name
+      parameters:
+        - in: path
+          name: name
+          required: true
+          schema:
+            type: string
+            example: example_job
+      responses:
+        "200":
+          $ref: "#/components/responses/FoundJob"
+        "404":
+          $ref: "#/components/responses/NotFoundJob"
+  /job/:
+    post:
+      tags:
+        - job
+      summary: "Create new job"
+      requestBody:
+        description: "Job parameters"
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RequestJob"
+      responses:
+        "200":
+          description: Return id of newly created job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResponseId"
+
+components:
+  schemas:
+    Id:
+      type: integer
+      format: int64
+      example: 10
+
+    Job:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/Id"
+        name:
+          type: string
+          example: example_job
+        crontabString:
+          type: string
+          example: 15 16 1 */3 *
+        scriptPath:
+          type: string
+          example: /home/user/me/check.sh
+        timeout:
+          type: integer
+          format: int64
+          example: 60000000
+          description: Timeout in nanoseconds
+    RequestJob:
+      type: object
+      required:
+        - name
+        - crontabString
+        - scriptPath
+        - timeout
+      properties:
+        name:
+          type: string
+          example: example_job
+        crontabString:
+          type: string
+          example: 15 16 1 */3 *
+        scriptPath:
+          type: string
+          example: /home/user/me/check.sh
+        timeout:
+          type: integer
+          format: int64
+          example: 60000000
+          description: Timeout in nanoseconds
+    ResponseId:
+      type: object
+      properties:
+        id:
+          $ref: "#/components/schemas/Id"
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          example: failed to get job by id 10
+  responses:
+    FoundJob:
+      description: Return found job
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Job"
+    NotFoundJob:
+      description: Job not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
