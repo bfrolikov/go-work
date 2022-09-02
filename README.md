@@ -9,7 +9,7 @@
 - [x] Job scheduler
 - [x] Command line interface for starting and stopping the app
 - [x] RESTful web interface for adding/removing/listing jobs
-- [ ] OpenAPI 3.0 specification
+- [x] OpenAPI 3.0 specification
 - [ ] Testing
 - [ ] Dockerfile and docker-compose.yml
 - [ ] CI/CD before merging into `master`
