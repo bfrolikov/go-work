@@ -68,7 +68,7 @@ func (eh *ErrorHandler) WriteAndLogValidationErrors(
 	fields["field errors"] = fieldErrors
 	log.WithFields(fields).Debug("Received invalid data")
 	resp, _ := json.Marshal(fieldErrors)
-	eh.writeJson(w, resp, http.StatusBadRequest)
+	eh.writeJson(w, resp, http.StatusUnprocessableEntity)
 }
 
 func (eh *ErrorHandler) writeJson(w http.ResponseWriter, jsonMsg []byte, statusCode int) {

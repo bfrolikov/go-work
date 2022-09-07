@@ -84,6 +84,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ResponseId"
+        "400":
+          description: Received invalid media type or ill-formed json
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: Job parameters validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationError"
 
 components:
   schemas:
@@ -111,13 +123,15 @@ components:
           format: int64
           example: 60000000
           description: Timeout in nanoseconds
-    RequestJob:
-      type: object
       required:
+        - id
         - name
         - crontabString
         - scriptPath
         - timeout
+
+    RequestJob:
+      type: object
       properties:
         name:
           type: string
@@ -133,11 +147,19 @@ components:
           format: int64
           example: 60000000
           description: Timeout in nanoseconds
+      required:
+        - name
+        - crontabString
+        - scriptPath
+        - timeout
+
     ResponseId:
       type: object
       properties:
         id:
           $ref: "#/components/schemas/Id"
+      required:
+        - id
 
     Error:
       type: object
@@ -145,6 +167,25 @@ components:
         error:
           type: string
           example: failed to get job by id 10
+      required:
+        - error
+
+    ValidationError:
+      type: object
+      properties:
+        name:
+          type: string
+          example: name must be unique
+        crontabString:
+          type: string
+          example: ill-formed crontab string
+        scriptPath:
+          type: string
+          example: file null.sh doesn't exist
+        timeout:
+          type: string
+          description: timeout is required
+
   responses:
     FoundJob:
       description: Return found job
