@@ -38,7 +38,7 @@ func NewSQLJobStorage(ctx context.Context, driverName, dataSourceName string) (*
 func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, scriptPath string, timeout time.Duration) (JobId, error) {
 	schedule, err := cron.ParseStandard(crontabString)
 	if err != nil {
-		return 0, err
+		return 0, err //FIXME: wrap errors
 	}
 
 	var id JobId

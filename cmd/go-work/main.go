@@ -33,7 +33,7 @@ func main() {
 	if err != nil {
 		log.Fatal(fmt.Errorf("could not parse command line args: %w", err))
 	}
-	datasourceName := fmt.Sprintf(
+	dataSourceName := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 		opts.DbHost,
 		opts.DbPort,
@@ -43,7 +43,7 @@ func main() {
 	)
 	background := context.Background()
 	var storage model.JobStorage
-	storage, err = model.NewSQLJobStorage(background, "postgres", datasourceName)
+	storage, err = model.NewSQLJobStorage(background, "postgres", dataSourceName)
 	if err != nil {
 		log.Fatal(fmt.Errorf("could not create job storage: %w", err))
 	}

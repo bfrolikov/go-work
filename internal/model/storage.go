@@ -22,7 +22,7 @@ type JobStorage interface {
 	CreateJob(ctx context.Context, name, crontabString, scriptPath string, timeout time.Duration) (JobId, error)
 	GetJob(ctx context.Context, id JobId) (Job, error)
 	DeleteJob(ctx context.Context, id JobId) error
-	GetJobByName(ctx context.Context, name string) (Job, error)
+	GetJobByName(ctx context.Context, name string) (Job, error) //FIXME: use pointers
 	MarkDueJobsRunning(ctx context.Context) ([]Job, error)
 	MarkJobDone(ctx context.Context, job Job) error
 }
