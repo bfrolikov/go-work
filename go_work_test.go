@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	_ "github.com/lib/pq"
-	log "github.com/sirupsen/logrus"
 	"go-work/internal/http"
 	"go-work/internal/model"
 	"go-work/test/data"
@@ -25,6 +24,11 @@ type testApp struct {
 }
 
 const timeout = time.Second * 30
+
+type testSuite struct {
+	t   *testing.T
+	app *testApp
+}
 
 func TestGoWork(t *testing.T) {
 	background := context.Background()
@@ -51,13 +55,18 @@ func TestGoWork(t *testing.T) {
 
 	app := testApp{server, nhttp.DefaultClient, database}
 	t.Run("Test REST API", func(t *testing.T) {
-		setupApp(background, &app, t)
+		suite := testSuite{
+			t,
+			&app,
+		}
+
+		suite.setupApp(background)
 		t.Run("Test creating and getting new job by id", func(t *testing.T) {
-			id, err := createJob(&data.CreatedJob, &app)
+			id, err := suite.createJob(&data.CreatedJob)
 			if err != nil {
 				t.Fatal(fmt.Errorf("error creating new job: %w", err))
 			}
-			job, err := getJobById(id, &app)
+			job, err := suite.getJobById(id)
 			if err != nil {
 				t.Fatal(fmt.Errorf("error getting created job by id %d: %w", id, err))
 			}
@@ -67,13 +76,13 @@ func TestGoWork(t *testing.T) {
 			requireEqual("timeout", &data.CreatedJob.Timeout, &job.Timeout, t)
 		}) //TODO: delete, create invalid, get nonexistent
 
-		setupApp(background, &app, t)
+		suite.setupApp(background)
 		t.Run("Test creating and getting new job by name", func(t *testing.T) {
-			_, err := createJob(&data.CreatedJob, &app)
+			_, err := suite.createJob(&data.CreatedJob)
 			if err != nil {
 				t.Fatal(fmt.Errorf("error creating new job: %w", err))
 			}
-			job, err := getJobByName(data.CreatedJob.Name, &app)
+			job, err := suite.getJobByName(data.CreatedJob.Name)
 			if err != nil {
 				t.Fatal(fmt.Errorf("error getting created job by name %s: %w", data.CreatedJob.Name, err))
 			}
@@ -83,7 +92,7 @@ func TestGoWork(t *testing.T) {
 			requireEqual("timeout", &data.CreatedJob.Timeout, &job.Timeout, t)
 		})
 
-		setupApp(background, &app, t)
+		suite.setupApp(background)
 		t.Run("Test deleting job", func(t *testing.T) {
 
 		})
@@ -98,37 +107,23 @@ func requireEqual[K comparable](name string, first K, second K, t *testing.T) {
 	}
 }
 
-func clearDatabase(ctx context.Context, database *sql.DB, t *testing.T) {
+func (ts *testSuite) clearDatabase(ctx context.Context) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	_, err := database.ExecContext(timeoutCtx, sqlquery.DeleteAll)
+	_, err := ts.app.database.ExecContext(timeoutCtx, sqlquery.DeleteAll)
 	if err != nil {
-		t.Fatal(fmt.Errorf("error clearing database %w", err))
+		ts.t.Fatal(fmt.Errorf("error clearing database %w", err))
 	}
-}
-
-type statusCodeError struct {
-	expectedStatusCode int
-	receivedStatusCode int
-}
-
-func (e *statusCodeError) Error() string {
-	return fmt.Sprintf(
-		"expected status code %d, got %d",
-		e.expectedStatusCode,
-		e.receivedStatusCode,
-	)
 }
 
 type responseId struct {
 	Id model.JobId `json:"id"`
 }
 
-func expectStatusCode(response *nhttp.Response, statusCode int) error {
+func (ts *testSuite) expectStatusCode(response *nhttp.Response, statusCode int) {
 	if response.StatusCode != statusCode {
-		return &statusCodeError{statusCode, response.StatusCode}
+		ts.t.Fatalf("expected status code %d, got %d", statusCode, response.StatusCode)
 	}
-	return nil
 }
 
 func decodeResponse(response *nhttp.Response, v any) error {
@@ -139,13 +134,13 @@ func decodeResponse(response *nhttp.Response, v any) error {
 	return nil
 }
 
-func createJob(jobData *data.JobData, app *testApp) (model.JobId, error) {
+func (ts *testSuite) createJob(jobData *data.JobData) (model.JobId, error) {
 	createJobUrl := fmt.Sprintf("http://localhost:%s/api/v1/job", os.Getenv("TEST_SERVER_PORT"))
 	jobDataJson, err := json.Marshal(jobData)
 	if err != nil {
 		return 0, fmt.Errorf("error marshalling job data: %w", err)
 	}
-	response, err := app.client.Post(
+	response, err := ts.app.client.Post(
 		createJobUrl,
 		"application/json",
 		bytes.NewReader(jobDataJson),
@@ -154,9 +149,7 @@ func createJob(jobData *data.JobData, app *testApp) (model.JobId, error) {
 		return 0, fmt.Errorf("error getting response: %w", err)
 	}
 	defer response.Body.Close()
-	if err = expectStatusCode(response, nhttp.StatusOK); err != nil {
-		return 0, fmt.Errorf("error creating job: %w", err)
-	}
+	ts.expectStatusCode(response, nhttp.StatusOK)
 	var jobResponseId responseId
 	if err = decodeResponse(response, &jobResponseId); err != nil {
 		return 0, err
@@ -164,15 +157,13 @@ func createJob(jobData *data.JobData, app *testApp) (model.JobId, error) {
 	return jobResponseId.Id, nil
 }
 
-func getJob(url string, app *testApp) (*model.Job, error) {
-	response, err := app.client.Get(url)
+func (ts *testSuite) getJob(url string) (*model.Job, error) {
+	response, err := ts.app.client.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	defer response.Body.Close()
-	if err = expectStatusCode(response, nhttp.StatusOK); err != nil {
-		return nil, fmt.Errorf("error getting job: %w", err)
-	}
+	ts.expectStatusCode(response, nhttp.StatusOK)
 	var responseJob model.Job
 	if err = decodeResponse(response, &responseJob); err != nil {
 		return nil, err
@@ -180,32 +171,30 @@ func getJob(url string, app *testApp) (*model.Job, error) {
 	return &responseJob, nil
 }
 
-func getJobById(id model.JobId, app *testApp) (*model.Job, error) {
+func (ts *testSuite) getJobById(id model.JobId) (*model.Job, error) {
 	getJobByIdUrl := fmt.Sprintf("http://localhost:%s/api/v1/job/%d/", os.Getenv("TEST_SERVER_PORT"), id)
-	return getJob(getJobByIdUrl, app)
+	return ts.getJob(getJobByIdUrl)
 }
 
-func getJobByName(name string, app *testApp) (*model.Job, error) {
+func (ts *testSuite) getJobByName(name string) (*model.Job, error) {
 	getJobByNameUrl := fmt.Sprintf("http://localhost:%s/api/v1/job/%s/", os.Getenv("TEST_SERVER_PORT"), name)
-	return getJob(getJobByNameUrl, app)
+	return ts.getJob(getJobByNameUrl)
 }
 
-func deleteJob(app *testApp) error {
+func (ts *testSuite) deleteJob() error {
 	return nil
 }
 
-func createJobs(app *testApp) {
+func (ts *testSuite) createJobs() {
 	for _, jobData := range data.InitialJobs {
-		_, err := createJob(&jobData, app)
+		_, err := ts.createJob(&jobData)
 		if err != nil {
-			log.WithFields(log.Fields{
-				"jobData": jobData,
-			}).Fatal(fmt.Errorf("error creating initial jobs: %w", err))
+			ts.t.Fatal(fmt.Errorf("error creating initial jobs: %w", err))
 		}
 	}
 }
 
-func setupApp(ctx context.Context, app *testApp, t *testing.T) {
-	clearDatabase(ctx, app.database, t)
-	createJobs(app)
+func (ts *testSuite) setupApp(ctx context.Context) {
+	ts.clearDatabase(ctx)
+	ts.createJobs()
 }
