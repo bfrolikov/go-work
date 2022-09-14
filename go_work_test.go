@@ -14,8 +14,6 @@ import (
 	"go-work/test/url"
 	nhttp "net/http"
 	"os"
-	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -31,7 +29,7 @@ const timeout = time.Second * 30
 var deleteAllJobsQuery = "DELETE from jobs"
 
 func TestGoWork(t *testing.T) {
-	resolveScriptPaths()
+	//resolveScriptPaths()
 	background := context.Background()
 	dataSourceName := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -80,7 +78,7 @@ func TestGoWork(t *testing.T) {
 			}
 			requireEqual("name", existingJob.Name, job.Name, t)
 			requireEqual("crontabString", existingJob.CrontabString, job.CrontabString, t)
-			requireEqual("scriptPath", existingJob.ScriptPath, job.ScriptPath, t)
+			requireEqual("command", existingJob.Command, job.Command, t)
 			requireEqual("timeout", existingJob.Timeout, job.Timeout, t)
 		})
 
@@ -94,7 +92,7 @@ func TestGoWork(t *testing.T) {
 			}
 			requireEqual("name", existingJob.Name, job.Name, t)
 			requireEqual("crontabString", existingJob.CrontabString, job.CrontabString, t)
-			requireEqual("scriptPath", existingJob.ScriptPath, job.ScriptPath, t)
+			requireEqual("command", existingJob.Command, job.Command, t)
 			requireEqual("timeout", existingJob.Timeout, job.Timeout, t)
 		})
 
@@ -115,7 +113,7 @@ func TestGoWork(t *testing.T) {
 			existingJobData := data.JobData{
 				Name:          existingJob.Name,
 				CrontabString: existingJob.CrontabString,
-				ScriptPath:    existingJob.ScriptPath,
+				Command:       existingJob.Command,
 				Timeout:       existingJob.Timeout,
 			}
 			_, err := app.createJob(&existingJobData)
@@ -201,7 +199,7 @@ func (e *statusCodeError) Error() string {
 
 func checkStatusCode(response *nhttp.Response, statusCode int) error {
 	if response.StatusCode != statusCode {
-		var errorResponse map[string]interface{}
+		var errorResponse map[string]string
 		var responseBytes []byte
 		err := decodeResponse(response, &errorResponse)
 		if err == nil {
@@ -292,7 +290,7 @@ func (ta *testApp) createJobs(t *testing.T) {
 		jobData := data.JobData{
 			Name:          job.Name,
 			CrontabString: job.CrontabString,
-			ScriptPath:    job.ScriptPath,
+			Command:       job.Command,
 			Timeout:       job.Timeout,
 		}
 		id, err := ta.createJob(&jobData)
@@ -308,11 +306,11 @@ func (ta *testApp) setupApp(ctx context.Context, t *testing.T) {
 	ta.createJobs(t)
 }
 
-func resolveScriptPaths() {
+/*func resolveScriptPaths() {
 	_, testFilename, _, _ := runtime.Caller(0)
 	scriptsDirectory := filepath.Join(filepath.Dir(testFilename), "test", "scripts")
 	for i := range data.InitialJobs {
-		scriptName := &data.InitialJobs[i].ScriptPath
+		scriptName := &data.InitialJobs[i].Command
 		*scriptName = filepath.Join(scriptsDirectory, *scriptName)
 	}
-}
+}*/

@@ -8,7 +8,7 @@ import (
 type JobData struct {
 	Name          string        `json:"name"`
 	CrontabString string        `json:"crontabString"`
-	ScriptPath    string        `json:"scriptPath"`
+	Command       string        `json:"command"`
 	Timeout       time.Duration `json:"timeout"`
 }
 

@@ -12,14 +12,14 @@ type Job struct {
 	Id            JobId         `json:"id"`
 	Name          string        `json:"name"`
 	CrontabString string        `json:"crontabString"`
-	ScriptPath    string        `json:"scriptPath"`
+	Command       string        `json:"command"`
 	Timeout       time.Duration `json:"timeout"`
 }
 
 var ErrorNotFound = errors.New("job not found")
 
 type JobStorage interface {
-	CreateJob(ctx context.Context, name, crontabString, scriptPath string, timeout time.Duration) (JobId, error)
+	CreateJob(ctx context.Context, name, crontabString, command string, timeout time.Duration) (JobId, error)
 	GetJob(ctx context.Context, id JobId) (Job, error)
 	DeleteJob(ctx context.Context, id JobId) error
 	GetJobByName(ctx context.Context, name string) (Job, error) //FIXME: use pointers

@@ -45,7 +45,7 @@ var (
 type requestJob struct {
 	Name          string        `json:"name" validate:"required,uniqueName"`
 	CrontabString string        `json:"crontabString" validate:"required,crontabString"`
-	ScriptPath    string        `json:"scriptPath" validate:"required,file"`
+	Command       string        `json:"command" validate:"required"`
 	Timeout       time.Duration `json:"timeout" validate:"required"`
 }
 
@@ -106,7 +106,7 @@ func (js *jobServer) createJobHandler(w http.ResponseWriter, req *http.Request) 
 		timeoutCtx,
 		rj.Name,
 		rj.CrontabString,
-		rj.ScriptPath,
+		rj.Command,
 		rj.Timeout,
 	)
 	if err != nil {
