@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	_ "github.com/lib/pq"
 	"go-work/internal/http"
@@ -24,11 +25,6 @@ type testApp struct {
 }
 
 const timeout = time.Second * 30
-
-type testSuite struct {
-	t   *testing.T
-	app *testApp
-}
 
 func TestGoWork(t *testing.T) {
 	background := context.Background()
@@ -55,50 +51,92 @@ func TestGoWork(t *testing.T) {
 
 	app := testApp{server, nhttp.DefaultClient, database}
 	t.Run("Test REST API", func(t *testing.T) {
-		suite := testSuite{
-			t,
-			&app,
-		}
+		t.Run("Test getting job by id", func(t *testing.T) {
+			app.setupApp(background, t)
 
-		suite.setupApp(background)
-		t.Run("Test creating and getting new job by id", func(t *testing.T) {
-			id, err := suite.createJob(&data.CreatedJob)
+			existingJob := data.InitialJobs[0]
+			job, err := app.getJobById(existingJob.Id)
 			if err != nil {
-				t.Fatal(fmt.Errorf("error creating new job: %w", err))
+				t.Fatal(fmt.Errorf("error getting created job by id %d: %w", existingJob.Id, err))
 			}
-			job, err := suite.getJobById(id)
-			if err != nil {
-				t.Fatal(fmt.Errorf("error getting created job by id %d: %w", id, err))
-			}
-			requireEqual("name", &data.CreatedJob.Name, &job.Name, t)
-			requireEqual("crontabString", &data.CreatedJob.CrontabString, &job.CrontabString, t)
-			requireEqual("scriptPath", &data.CreatedJob.ScriptPath, &job.ScriptPath, t)
-			requireEqual("timeout", &data.CreatedJob.Timeout, &job.Timeout, t)
-		}) //TODO: delete, create invalid, get nonexistent
-
-		suite.setupApp(background)
-		t.Run("Test creating and getting new job by name", func(t *testing.T) {
-			_, err := suite.createJob(&data.CreatedJob)
-			if err != nil {
-				t.Fatal(fmt.Errorf("error creating new job: %w", err))
-			}
-			job, err := suite.getJobByName(data.CreatedJob.Name)
-			if err != nil {
-				t.Fatal(fmt.Errorf("error getting created job by name %s: %w", data.CreatedJob.Name, err))
-			}
-			requireEqual("name", &data.CreatedJob.Name, &job.Name, t)
-			requireEqual("crontabString", &data.CreatedJob.CrontabString, &job.CrontabString, t)
-			requireEqual("scriptPath", &data.CreatedJob.ScriptPath, &job.ScriptPath, t)
-			requireEqual("timeout", &data.CreatedJob.Timeout, &job.Timeout, t)
+			requireEqual("name", existingJob.Name, job.Name, t)
+			requireEqual("crontabString", existingJob.CrontabString, job.CrontabString, t)
+			requireEqual("scriptPath", existingJob.ScriptPath, job.ScriptPath, t)
+			requireEqual("timeout", existingJob.Timeout, job.Timeout, t)
 		})
 
-		suite.setupApp(background)
-		t.Run("Test deleting job", func(t *testing.T) {
+		t.Run("Test creating and getting new job by name", func(t *testing.T) {
+			app.setupApp(background, t)
 
+			existingJob := data.InitialJobs[0]
+			job, err := app.getJobByName(existingJob.Name)
+			if err != nil {
+				t.Fatal(fmt.Errorf("error getting created job by name %s: %w", existingJob.Name, err))
+			}
+			requireEqual("name", existingJob.Name, job.Name, t)
+			requireEqual("crontabString", existingJob.CrontabString, job.CrontabString, t)
+			requireEqual("scriptPath", existingJob.ScriptPath, job.ScriptPath, t)
+			requireEqual("timeout", existingJob.Timeout, job.Timeout, t)
+		})
+
+		t.Run("Test deleting job", func(t *testing.T) {
+			app.setupApp(background, t)
+
+			existingJob := data.InitialJobs[0]
+			err := app.deleteJob(existingJob.Id)
+			if err != nil {
+				t.Fatal(fmt.Errorf("error deleting job with id %d: %w", existingJob.Id, err))
+			}
+		})
+
+		t.Run("Test creating already existing job", func(t *testing.T) {
+			app.setupApp(background, t)
+
+			existingJob := data.InitialJobs[0]
+			existingJobData := data.JobData{
+				Name:          existingJob.Name,
+				CrontabString: existingJob.CrontabString,
+				ScriptPath:    existingJob.ScriptPath,
+				Timeout:       existingJob.Timeout,
+			}
+			_, err := app.createJob(&existingJobData)
+			expectErrorStatusCode(err, nhttp.StatusUnprocessableEntity, t)
+		})
+
+		t.Run("Test getting nonexistent job", func(t *testing.T) {
+			app.setupApp(background, t)
+
+			var maxId model.JobId = 0
+			for i, job := range data.InitialJobs {
+				if i == 0 || maxId < job.Id {
+					maxId = job.Id
+				}
+			}
+			_, err := app.getJobById(maxId + 1)
+			expectErrorStatusCode(err, nhttp.StatusNotFound, t)
 		})
 	})
 
 	//TODO: check cron functionality
+}
+
+func expectErrorStatusCode(err error, errorStatusCode int, t *testing.T) {
+	if err != nil {
+		var statusCodeErr *statusCodeError
+		if errors.As(err, &statusCodeErr) {
+			if statusCodeErr.receivedStatusCode != errorStatusCode {
+				t.Fatalf(
+					"expected status code %d, received %d",
+					nhttp.StatusUnprocessableEntity,
+					statusCodeErr.receivedStatusCode,
+				)
+			}
+		} else {
+			t.Fatal(err)
+		}
+	} else {
+		t.Fatalf("expected error, got %d", nhttp.StatusOK)
+	}
 }
 
 func requireEqual[K comparable](name string, first K, second K, t *testing.T) {
@@ -107,12 +145,12 @@ func requireEqual[K comparable](name string, first K, second K, t *testing.T) {
 	}
 }
 
-func (ts *testSuite) clearDatabase(ctx context.Context) {
+func (ta *testApp) clearDatabase(ctx context.Context, t *testing.T) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	_, err := ts.app.database.ExecContext(timeoutCtx, sqlquery.DeleteAll)
+	_, err := ta.database.ExecContext(timeoutCtx, sqlquery.DeleteAll)
 	if err != nil {
-		ts.t.Fatal(fmt.Errorf("error clearing database %w", err))
+		t.Fatal(fmt.Errorf("error clearing database %w", err))
 	}
 }
 
@@ -120,10 +158,24 @@ type responseId struct {
 	Id model.JobId `json:"id"`
 }
 
-func (ts *testSuite) expectStatusCode(response *nhttp.Response, statusCode int) {
+type statusCodeError struct {
+	expectedStatusCode int
+	receivedStatusCode int
+}
+
+func (e *statusCodeError) Error() string {
+	return fmt.Sprintf(
+		"expected status code %d, got %d",
+		e.expectedStatusCode,
+		e.receivedStatusCode,
+	)
+}
+
+func checkStatusCode(response *nhttp.Response, statusCode int) error {
 	if response.StatusCode != statusCode {
-		ts.t.Fatalf("expected status code %d, got %d", statusCode, response.StatusCode)
+		return &statusCodeError{statusCode, response.StatusCode}
 	}
+	return nil
 }
 
 func decodeResponse(response *nhttp.Response, v any) error {
@@ -134,22 +186,24 @@ func decodeResponse(response *nhttp.Response, v any) error {
 	return nil
 }
 
-func (ts *testSuite) createJob(jobData *data.JobData) (model.JobId, error) {
+func (ta *testApp) createJob(jobData *data.JobData) (model.JobId, error) {
 	createJobUrl := fmt.Sprintf("http://localhost:%s/api/v1/job", os.Getenv("TEST_SERVER_PORT"))
 	jobDataJson, err := json.Marshal(jobData)
 	if err != nil {
 		return 0, fmt.Errorf("error marshalling job data: %w", err)
 	}
-	response, err := ts.app.client.Post(
+	response, err := ta.client.Post(
 		createJobUrl,
 		"application/json",
 		bytes.NewReader(jobDataJson),
 	)
 	if err != nil {
-		return 0, fmt.Errorf("error getting response: %w", err)
+		return 0, fmt.Errorf("error getting response while creating job %v: %w", jobData, err)
 	}
 	defer response.Body.Close()
-	ts.expectStatusCode(response, nhttp.StatusOK)
+	if err = checkStatusCode(response, nhttp.StatusOK); err != nil {
+		return 0, err
+	}
 	var jobResponseId responseId
 	if err = decodeResponse(response, &jobResponseId); err != nil {
 		return 0, err
@@ -157,13 +211,15 @@ func (ts *testSuite) createJob(jobData *data.JobData) (model.JobId, error) {
 	return jobResponseId.Id, nil
 }
 
-func (ts *testSuite) getJob(url string) (*model.Job, error) {
-	response, err := ts.app.client.Get(url)
+func (ta *testApp) getJob(url string) (*model.Job, error) {
+	response, err := ta.client.Get(url)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting response while getting job by url \"%s\": %w", url, err)
 	}
 	defer response.Body.Close()
-	ts.expectStatusCode(response, nhttp.StatusOK)
+	if err = checkStatusCode(response, nhttp.StatusOK); err != nil {
+		return nil, err
+	}
 	var responseJob model.Job
 	if err = decodeResponse(response, &responseJob); err != nil {
 		return nil, err
@@ -171,30 +227,45 @@ func (ts *testSuite) getJob(url string) (*model.Job, error) {
 	return &responseJob, nil
 }
 
-func (ts *testSuite) getJobById(id model.JobId) (*model.Job, error) {
+func (ta *testApp) getJobById(id model.JobId) (*model.Job, error) {
 	getJobByIdUrl := fmt.Sprintf("http://localhost:%s/api/v1/job/%d/", os.Getenv("TEST_SERVER_PORT"), id)
-	return ts.getJob(getJobByIdUrl)
+	return ta.getJob(getJobByIdUrl)
 }
 
-func (ts *testSuite) getJobByName(name string) (*model.Job, error) {
+func (ta *testApp) getJobByName(name string) (*model.Job, error) {
 	getJobByNameUrl := fmt.Sprintf("http://localhost:%s/api/v1/job/%s/", os.Getenv("TEST_SERVER_PORT"), name)
-	return ts.getJob(getJobByNameUrl)
+	return ta.getJob(getJobByNameUrl)
 }
 
-func (ts *testSuite) deleteJob() error {
-	return nil
+func (ta *testApp) deleteJob(id model.JobId) error {
+	deleteJobUrl := fmt.Sprintf("http://localhost:%s/api/v1/job/%s/", os.Getenv("TEST_SERVER_PORT"), id)
+	deleteRequest, _ := nhttp.NewRequest("DELETE", deleteJobUrl, nil)
+	response, err := ta.client.Do(deleteRequest)
+	if err != nil {
+		return fmt.Errorf("error getting response while deleting job with id %d: %w", id, err)
+	}
+	defer response.Body.Close()
+	return checkStatusCode(response, nhttp.StatusOK)
 }
 
-func (ts *testSuite) createJobs() {
-	for _, jobData := range data.InitialJobs {
-		_, err := ts.createJob(&jobData)
-		if err != nil {
-			ts.t.Fatal(fmt.Errorf("error creating initial jobs: %w", err))
+func (ta *testApp) createJobs(t *testing.T) {
+	for i := range data.InitialJobs {
+		job := &data.InitialJobs[i]
+		jobData := data.JobData{
+			Name:          job.Name,
+			CrontabString: job.CrontabString,
+			ScriptPath:    job.ScriptPath,
+			Timeout:       job.Timeout,
 		}
+		id, err := ta.createJob(&jobData)
+		if err != nil {
+			t.Fatal(fmt.Errorf("error creating initial jobs: %w", err))
+		}
+		job.Id = id
 	}
 }
 
-func (ts *testSuite) setupApp(ctx context.Context) {
-	ts.clearDatabase(ctx)
-	ts.createJobs()
+func (ta *testApp) setupApp(ctx context.Context, t *testing.T) {
+	ta.clearDatabase(ctx, t)
+	ta.createJobs(t)
 }

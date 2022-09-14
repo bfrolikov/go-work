@@ -1,6 +1,9 @@
 package data
 
-import "time"
+import (
+	"go-work/internal/model"
+	"time"
+)
 
 type JobData struct {
 	Name          string        `json:"name"`
@@ -9,23 +12,18 @@ type JobData struct {
 	Timeout       time.Duration `json:"timeout"`
 }
 
-var InitialJobs = []JobData{
-	{"Run every minute",
+var InitialJobs = []model.Job{
+	{0,
+		"Run every minute",
 		"*/1 * * * *",
 		"./test_job1.sh",
 		250000000,
 	},
 	{
+		0,
 		"Run every 2 minutes",
 		"*/2 * * * *",
 		"./test_job2.sh",
 		250000000,
 	},
-}
-
-var CreatedJob = JobData{
-	"Newly created",
-	"1 2 3 4 5",
-	"./test_job3.sh",
-	250000000,
 }
