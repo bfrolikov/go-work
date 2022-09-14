@@ -11,9 +11,11 @@ import (
 	"go-work/internal/http"
 	"go-work/internal/model"
 	"go-work/test/data"
-	"go-work/test/sqlquery"
+	"go-work/test/url"
 	nhttp "net/http"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -26,13 +28,16 @@ type testApp struct {
 
 const timeout = time.Second * 30
 
+var deleteAllJobsQuery = "DELETE from jobs"
+
 func TestGoWork(t *testing.T) {
+	resolveScriptPaths()
 	background := context.Background()
 	dataSourceName := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		os.Getenv("TEST_DB_HOST"),
 		os.Getenv("TEST_DB_PORT"),
-		os.Getenv("TEST_DB_USER "),
+		os.Getenv("TEST_DB_USER"),
 		os.Getenv("TEST_DB_PASSWORD"),
 		os.Getenv("TEST_DB_NAME"),
 	)
@@ -44,10 +49,24 @@ func TestGoWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(fmt.Errorf("could not create job storage: %w", err))
 	}
-	server, err := http.NewJobServer(storage, os.Getenv("TEST_SERVER_PORT"))
+	server, err := http.NewJobServer(storage, fmt.Sprintf(":%s", os.Getenv("TEST_SERVER_PORT")))
 	if err != nil {
 		t.Fatal(fmt.Errorf("could not create job server: %w", err))
 	}
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			if !errors.Is(err, nhttp.ErrServerClosed) {
+				t.Error(fmt.Errorf("error starting server: %w", err))
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		timeoutCtx, cancel := context.WithTimeout(background, timeout)
+		defer cancel()
+		if err := server.Shutdown(timeoutCtx); err != nil {
+			t.Fatal(fmt.Errorf("error while shutting down sever: %w", err))
+		}
+	})
 
 	app := testApp{server, nhttp.DefaultClient, database}
 	t.Run("Test REST API", func(t *testing.T) {
@@ -148,7 +167,7 @@ func requireEqual[K comparable](name string, first K, second K, t *testing.T) {
 func (ta *testApp) clearDatabase(ctx context.Context, t *testing.T) {
 	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	_, err := ta.database.ExecContext(timeoutCtx, sqlquery.DeleteAll)
+	_, err := ta.database.ExecContext(timeoutCtx, deleteAllJobsQuery)
 	if err != nil {
 		t.Fatal(fmt.Errorf("error clearing database %w", err))
 	}
@@ -161,19 +180,39 @@ type responseId struct {
 type statusCodeError struct {
 	expectedStatusCode int
 	receivedStatusCode int
+	responseBody       string
+	responseDecodeErr  error
 }
 
 func (e *statusCodeError) Error() string {
+	responseString := ""
+	if e.responseDecodeErr != nil {
+		responseString = fmt.Sprintf(" and an error while decoding response: %s", e.responseDecodeErr.Error())
+	} else {
+		responseString = fmt.Sprintf(", response body: %s", e.responseBody)
+	}
 	return fmt.Sprintf(
-		"expected status code %d, got %d",
+		"expected status code %d, got %d%s",
 		e.expectedStatusCode,
 		e.receivedStatusCode,
+		responseString,
 	)
 }
 
 func checkStatusCode(response *nhttp.Response, statusCode int) error {
 	if response.StatusCode != statusCode {
-		return &statusCodeError{statusCode, response.StatusCode}
+		var errorResponse map[string]interface{}
+		var responseBytes []byte
+		err := decodeResponse(response, &errorResponse)
+		if err == nil {
+			responseBytes, _ = json.Marshal(errorResponse)
+		}
+		return &statusCodeError{
+			statusCode,
+			response.StatusCode,
+			string(responseBytes),
+			err,
+		}
 	}
 	return nil
 }
@@ -187,13 +226,12 @@ func decodeResponse(response *nhttp.Response, v any) error {
 }
 
 func (ta *testApp) createJob(jobData *data.JobData) (model.JobId, error) {
-	createJobUrl := fmt.Sprintf("http://localhost:%s/api/v1/job", os.Getenv("TEST_SERVER_PORT"))
 	jobDataJson, err := json.Marshal(jobData)
 	if err != nil {
 		return 0, fmt.Errorf("error marshalling job data: %w", err)
 	}
 	response, err := ta.client.Post(
-		createJobUrl,
+		url.CreateJob(),
 		"application/json",
 		bytes.NewReader(jobDataJson),
 	)
@@ -202,7 +240,7 @@ func (ta *testApp) createJob(jobData *data.JobData) (model.JobId, error) {
 	}
 	defer response.Body.Close()
 	if err = checkStatusCode(response, nhttp.StatusOK); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("error creating job %v: %w", jobData, err)
 	}
 	var jobResponseId responseId
 	if err = decodeResponse(response, &jobResponseId); err != nil {
@@ -218,7 +256,7 @@ func (ta *testApp) getJob(url string) (*model.Job, error) {
 	}
 	defer response.Body.Close()
 	if err = checkStatusCode(response, nhttp.StatusOK); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error getting job by url %s: %w", url, err)
 	}
 	var responseJob model.Job
 	if err = decodeResponse(response, &responseJob); err != nil {
@@ -228,24 +266,24 @@ func (ta *testApp) getJob(url string) (*model.Job, error) {
 }
 
 func (ta *testApp) getJobById(id model.JobId) (*model.Job, error) {
-	getJobByIdUrl := fmt.Sprintf("http://localhost:%s/api/v1/job/%d/", os.Getenv("TEST_SERVER_PORT"), id)
-	return ta.getJob(getJobByIdUrl)
+	return ta.getJob(url.GetJobById(id))
 }
 
 func (ta *testApp) getJobByName(name string) (*model.Job, error) {
-	getJobByNameUrl := fmt.Sprintf("http://localhost:%s/api/v1/job/%s/", os.Getenv("TEST_SERVER_PORT"), name)
-	return ta.getJob(getJobByNameUrl)
+	return ta.getJob(url.GetJobByName(name))
 }
 
 func (ta *testApp) deleteJob(id model.JobId) error {
-	deleteJobUrl := fmt.Sprintf("http://localhost:%s/api/v1/job/%s/", os.Getenv("TEST_SERVER_PORT"), id)
-	deleteRequest, _ := nhttp.NewRequest("DELETE", deleteJobUrl, nil)
+	deleteRequest, _ := nhttp.NewRequest("DELETE", url.DeleteJob(id), nil)
 	response, err := ta.client.Do(deleteRequest)
 	if err != nil {
 		return fmt.Errorf("error getting response while deleting job with id %d: %w", id, err)
 	}
 	defer response.Body.Close()
-	return checkStatusCode(response, nhttp.StatusOK)
+	if err = checkStatusCode(response, nhttp.StatusOK); err != nil {
+		return fmt.Errorf("error deleting job with id %d: %w", id, err)
+	}
+	return nil
 }
 
 func (ta *testApp) createJobs(t *testing.T) {
@@ -268,4 +306,13 @@ func (ta *testApp) createJobs(t *testing.T) {
 func (ta *testApp) setupApp(ctx context.Context, t *testing.T) {
 	ta.clearDatabase(ctx, t)
 	ta.createJobs(t)
+}
+
+func resolveScriptPaths() {
+	_, testFilename, _, _ := runtime.Caller(0)
+	scriptsDirectory := filepath.Join(filepath.Dir(testFilename), "test", "scripts")
+	for i := range data.InitialJobs {
+		scriptName := &data.InitialJobs[i].ScriptPath
+		*scriptName = filepath.Join(scriptsDirectory, *scriptName)
+	}
 }

@@ -214,7 +214,7 @@ func NewJobServer(storage model.JobStorage, addr string) (*http.Server, error) {
 	router.HandleFunc("/api/v1/job/", server.createJobHandler).Methods("POST")
 	router.HandleFunc("/api/v1/job/{id:[0-9]+}/", server.getJobHandler).Methods("GET")
 	router.HandleFunc("/api/v1/job/{id:[0-9]+}/", server.deleteJobHandler).Methods("DELETE")
-	router.HandleFunc("/api/v1/job/{name:[a-zA-Z0-9]+}/", server.getJobByNameHandler).Methods("GET")
+	router.HandleFunc("/api/v1/job/{name:[a-zA-Z_]\\w*}/", server.getJobByNameHandler).Methods("GET")
 	router.Use(loggingMiddleware)
 	router.StrictSlash(true)
 	return &http.Server{Addr: addr, Handler: router}, nil

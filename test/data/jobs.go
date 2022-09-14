@@ -14,16 +14,16 @@ type JobData struct {
 
 var InitialJobs = []model.Job{
 	{0,
-		"Run every minute",
+		"run_every_minute",
 		"*/1 * * * *",
-		"./test_job1.sh",
+		"test_job1.py",
 		250000000,
 	},
 	{
 		0,
-		"Run every 2 minutes",
+		"run_every_2_minutes",
 		"*/2 * * * *",
-		"./test_job2.sh",
+		"test_job2.py",
 		250000000,
 	},
 }
