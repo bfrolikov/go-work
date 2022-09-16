@@ -59,7 +59,6 @@ func TestGoWork(t *testing.T) {
 	}
 	registerServer(background, t, server)
 
-	log.SetLevel(log.ErrorLevel)
 	app := testApp{server, nhttp.DefaultClient, database}
 	t.Run("Test REST API", func(t *testing.T) {
 		t.Run("Test getting job by id", func(t *testing.T) {
@@ -132,7 +131,7 @@ func TestGoWork(t *testing.T) {
 	executionData := data.NewExecutionData()
 
 	registerServer(background, t, getPingServer(executionData))
-
+	log.SetLevel(log.ErrorLevel)
 	t.Run("Test job execution", func(t *testing.T) {
 		t.Run("Test execution of initial jobs", func(t *testing.T) {
 			app.setupApp(background, t)

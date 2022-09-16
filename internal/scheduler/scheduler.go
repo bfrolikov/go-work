@@ -37,9 +37,7 @@ func (skd *Scheduler) startDueJobs(ctx context.Context) {
 		case <-time.After(skd.pingInterval):
 			jobs, err := skd.storage.MarkDueJobsRunning(ctx)
 			if err != nil {
-				log.WithFields(log.Fields{
-					"error": err,
-				}).Error("Error marking due jobs running")
+				log.Errorf("Error marking due jobs running: %s", err)
 			}
 
 			for _, job := range jobs {
@@ -51,17 +49,15 @@ func (skd *Scheduler) startDueJobs(ctx context.Context) {
 				cancel()
 				if err != nil {
 					log.WithFields(log.Fields{
-						"error": err,
-						"job":   job,
-					}).Error("Error executing job") //FIXME: wrap errors
+						"job": job,
+					}).Errorf("Error executing job: %s", err)
 				}
 
 				err = skd.storage.MarkJobDone(ctx, job)
 				if err != nil {
 					log.WithFields(log.Fields{
-						"error": err,
-						"job":   job,
-					}).Error("Error marking job done")
+						"job": job,
+					}).Errorf("Error marking job done: %s", err)
 				}
 			}
 		}
@@ -76,9 +72,8 @@ func (skd *Scheduler) monitorDone(ctx context.Context) {
 			err := skd.storage.MarkJobDone(ctx, job)
 			if err != nil {
 				log.WithFields(log.Fields{
-					"error": err,
-					"job":   job,
-				}).Error("Error signaling completion of job")
+					"job": job,
+				}).Errorf("Error signaling completion of job: %s", err)
 			}
 		case <-ctx.Done():
 			return

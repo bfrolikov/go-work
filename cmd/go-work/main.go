@@ -31,7 +31,7 @@ func main() {
 	opts := Options{}
 	_, err := flags.Parse(&opts)
 	if err != nil {
-		log.Fatal(fmt.Errorf("could not parse command line args: %w", err))
+		log.Fatalf("Could not parse command line args: %s", err)
 	}
 	dataSourceName := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
@@ -45,11 +45,11 @@ func main() {
 	var storage model.JobStorage
 	storage, err = model.NewSQLJobStorage(background, "postgres", dataSourceName)
 	if err != nil {
-		log.Fatal(fmt.Errorf("could not create job storage: %w", err))
+		log.Fatalf("Could not create job storage: %s", err)
 	}
 	server, err := http.NewJobServer(storage, fmt.Sprintf(":%d", opts.ServerPort))
 	if err != nil {
-		log.Fatal(fmt.Errorf("could not create job server: %w", err))
+		log.Fatalf("Could not create job server: %s", err)
 	}
 	cancelCtx, cancel := context.WithCancel(background)
 	sigs := make(chan os.Signal, 1)
@@ -64,7 +64,7 @@ func main() {
 	}
 	go func() {
 		if err := server.ListenAndServe(); err != nil {
-			log.Error(fmt.Errorf("listen and serve error: %w", err))
+			log.Errorf("Listen and serve error: %s", err)
 		}
 	}()
 	<-sigs
@@ -72,7 +72,7 @@ func main() {
 	timeoutCtx, timeoutCancel := context.WithTimeout(background, serverShutdownTimeout)
 	defer timeoutCancel()
 	if err = server.Shutdown(timeoutCtx); err != nil {
-		log.Error(fmt.Errorf("failed to shutdown server: %w", err))
+		log.Errorf("Failed to shutdown server: %s", err)
 	}
 	wg.Wait()
 }
