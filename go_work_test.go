@@ -30,7 +30,7 @@ type testApp struct {
 	database *sql.DB
 }
 
-const timeout = time.Second * 30
+const timeout = time.Second * 15
 
 var deleteAllJobsQuery = "DELETE from jobs"
 
@@ -66,7 +66,7 @@ func TestGoWork(t *testing.T) {
 			app.setupApp(background, t)
 
 			existingJob := data.InitialJobs[0]
-			job, err := app.getJobById(existingJob.Id)
+			job, err := app.getJobById(background, existingJob.Id)
 			if err != nil {
 				t.Fatal(fmt.Errorf("error getting created job by id %d: %w", existingJob.Id, err))
 			}
@@ -80,7 +80,7 @@ func TestGoWork(t *testing.T) {
 			app.setupApp(background, t)
 
 			existingJob := data.InitialJobs[0]
-			job, err := app.getJobByName(existingJob.Name)
+			job, err := app.getJobByName(background, existingJob.Name)
 			if err != nil {
 				t.Fatal(fmt.Errorf("error getting created job by name %s: %w", existingJob.Name, err))
 			}
@@ -94,7 +94,7 @@ func TestGoWork(t *testing.T) {
 			app.setupApp(background, t)
 
 			existingJob := data.InitialJobs[0]
-			err := app.deleteJob(existingJob.Id)
+			err := app.deleteJob(background, existingJob.Id)
 			if err != nil {
 				t.Fatal(fmt.Errorf("error deleting job with id %d: %w", existingJob.Id, err))
 			}
@@ -110,7 +110,7 @@ func TestGoWork(t *testing.T) {
 				Command:       existingJob.Command,
 				Timeout:       existingJob.Timeout,
 			}
-			_, err := app.createJob(&existingJobData)
+			_, err := app.createJob(background, &existingJobData)
 			expectErrorStatusCode(err, nhttp.StatusUnprocessableEntity, t)
 		})
 
@@ -123,7 +123,7 @@ func TestGoWork(t *testing.T) {
 					maxId = job.Id
 				}
 			}
-			_, err := app.getJobById(maxId + 1)
+			_, err := app.getJobById(background, maxId+1)
 			expectErrorStatusCode(err, nhttp.StatusNotFound, t)
 		})
 	})
@@ -180,9 +180,9 @@ func (ta *testApp) alterDatabase(ctx context.Context, t *testing.T) {
 		case <-time.After(2 * time.Second):
 			var err error = nil
 			if create {
-				id, err = ta.createJob(&createdJobData)
+				id, err = ta.createJob(ctx, &createdJobData)
 			} else {
-				err = ta.deleteJob(id)
+				err = ta.deleteJob(ctx, id)
 			}
 			if err != nil {
 				t.Error(err)
@@ -307,16 +307,23 @@ func decodeResponse(response *nhttp.Response, v any) error {
 	return nil
 }
 
-func (ta *testApp) createJob(jobData *data.JobRequestData) (model.JobId, error) {
+func (ta *testApp) createJob(ctx context.Context, jobData *data.JobRequestData) (model.JobId, error) {
 	jobDataJson, err := json.Marshal(jobData)
 	if err != nil {
 		return 0, fmt.Errorf("error marshalling job data: %w", err)
 	}
-	response, err := ta.client.Post(
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	createJobRequest, _ := nhttp.NewRequestWithContext(
+		timeoutCtx,
+		"POST",
 		url.CreateJob(),
-		"application/json",
 		bytes.NewReader(jobDataJson),
 	)
+	createJobRequest.Header.Set("Content-Type", "application/json")
+
+	response, err := ta.client.Do(createJobRequest)
 	if err != nil {
 		return 0, fmt.Errorf("error getting response while creating job %v: %w", jobData, err)
 	}
@@ -331,8 +338,17 @@ func (ta *testApp) createJob(jobData *data.JobRequestData) (model.JobId, error) 
 	return jobResponseId.Id, nil
 }
 
-func (ta *testApp) getJob(url string) (*model.Job, error) {
-	response, err := ta.client.Get(url)
+func (ta *testApp) getJob(ctx context.Context, url string) (*model.Job, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	getJobRequest, _ := nhttp.NewRequestWithContext(
+		timeoutCtx,
+		url,
+		"GET",
+		nil,
+	)
+
+	response, err := ta.client.Do(getJobRequest)
 	if err != nil {
 		return nil, fmt.Errorf("error getting response while getting job by url \"%s\": %w", url, err)
 	}
@@ -347,16 +363,21 @@ func (ta *testApp) getJob(url string) (*model.Job, error) {
 	return &responseJob, nil
 }
 
-func (ta *testApp) getJobById(id model.JobId) (*model.Job, error) {
-	return ta.getJob(url.GetJobById(id))
+func (ta *testApp) getJobById(ctx context.Context, id model.JobId) (*model.Job, error) {
+	return ta.getJob(ctx, url.GetJobById(id))
 }
 
-func (ta *testApp) getJobByName(name string) (*model.Job, error) {
-	return ta.getJob(url.GetJobByName(name))
+func (ta *testApp) getJobByName(ctx context.Context, name string) (*model.Job, error) {
+	return ta.getJob(ctx, url.GetJobByName(name))
 }
 
-func (ta *testApp) deleteJob(id model.JobId) error {
-	deleteRequest, _ := nhttp.NewRequest("DELETE", url.DeleteJob(id), nil)
+func (ta *testApp) deleteJob(ctx context.Context, id model.JobId) error {
+	deleteRequest, _ := nhttp.NewRequestWithContext(
+		ctx,
+		"DELETE",
+		url.DeleteJob(id),
+		nil,
+	)
 	response, err := ta.client.Do(deleteRequest)
 	if err != nil {
 		return fmt.Errorf("error getting response while deleting job with id %d: %w", id, err)
@@ -368,7 +389,7 @@ func (ta *testApp) deleteJob(id model.JobId) error {
 	return nil
 }
 
-func (ta *testApp) createJobs(t *testing.T) {
+func (ta *testApp) createJobs(ctx context.Context, t *testing.T) {
 	for i := range data.InitialJobs {
 		job := &data.InitialJobs[i]
 		jobData := data.JobRequestData{
@@ -377,7 +398,7 @@ func (ta *testApp) createJobs(t *testing.T) {
 			Command:       job.Command,
 			Timeout:       job.Timeout,
 		}
-		id, err := ta.createJob(&jobData)
+		id, err := ta.createJob(ctx, &jobData)
 		if err != nil {
 			t.Fatal(fmt.Errorf("error creating initial jobs: %w", err))
 		}
@@ -387,7 +408,7 @@ func (ta *testApp) createJobs(t *testing.T) {
 
 func (ta *testApp) setupApp(ctx context.Context, t *testing.T) {
 	ta.clearDatabase(ctx, t)
-	ta.createJobs(t)
+	ta.createJobs(ctx, t)
 }
 
 func resolveCommands() {
