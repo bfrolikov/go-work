@@ -7,13 +7,19 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/gorilla/mux"
 	_ "github.com/lib/pq"
+	log "github.com/sirupsen/logrus"
 	"go-work/internal/http"
 	"go-work/internal/model"
+	"go-work/internal/scheduler"
 	"go-work/test/data"
 	"go-work/test/url"
 	nhttp "net/http"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -29,7 +35,7 @@ const timeout = time.Second * 30
 var deleteAllJobsQuery = "DELETE from jobs"
 
 func TestGoWork(t *testing.T) {
-	//resolveScriptPaths()
+	resolveCommands()
 	background := context.Background()
 	dataSourceName := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -51,21 +57,9 @@ func TestGoWork(t *testing.T) {
 	if err != nil {
 		t.Fatal(fmt.Errorf("could not create job server: %w", err))
 	}
-	go func() {
-		if err := server.ListenAndServe(); err != nil {
-			if !errors.Is(err, nhttp.ErrServerClosed) {
-				t.Error(fmt.Errorf("error starting server: %w", err))
-			}
-		}
-	}()
-	t.Cleanup(func() {
-		timeoutCtx, cancel := context.WithTimeout(background, timeout)
-		defer cancel()
-		if err := server.Shutdown(timeoutCtx); err != nil {
-			t.Fatal(fmt.Errorf("error while shutting down sever: %w", err))
-		}
-	})
+	registerServer(background, t, server)
 
+	log.SetLevel(log.ErrorLevel)
 	app := testApp{server, nhttp.DefaultClient, database}
 	t.Run("Test REST API", func(t *testing.T) {
 		t.Run("Test getting job by id", func(t *testing.T) {
@@ -110,7 +104,7 @@ func TestGoWork(t *testing.T) {
 			app.setupApp(background, t)
 
 			existingJob := data.InitialJobs[0]
-			existingJobData := data.JobData{
+			existingJobData := data.JobRequestData{
 				Name:          existingJob.Name,
 				CrontabString: existingJob.CrontabString,
 				Command:       existingJob.Command,
@@ -134,7 +128,53 @@ func TestGoWork(t *testing.T) {
 		})
 	})
 
-	//TODO: check cron functionality
+	schd := scheduler.New(storage, 1)
+	executionData := data.NewExecutionData()
+
+	registerServer(background, t, getPingServer(executionData))
+
+	t.Run("Test job execution", func(t *testing.T) {
+		t.Run("Test execution of initial jobs", func(t *testing.T) {
+			app.setupApp(background, t)
+			cancelCtx, cancel := context.WithCancel(background)
+			go func() {
+				schd.Start(cancelCtx)
+			}()
+			time.Sleep(2*time.Duration(executionData.MaxInterval())*time.Minute + data.IntervalEps)
+			if err := executionData.ValidateExecutionData(); err != nil {
+				t.Fatal(fmt.Errorf("error validating execution of tasks: %w", err))
+			}
+			cancel()
+		})
+	})
+}
+
+func getPingServer(executionData *data.ExecutionData) *nhttp.Server {
+	pingRouter := mux.NewRouter()
+	pingRouter.StrictSlash(true)
+	pingRouter.HandleFunc("/tests/ping/{interval:[0-9]+}/", func(w nhttp.ResponseWriter, req *nhttp.Request) {
+		interval, _ := strconv.Atoi(mux.Vars(req)["interval"])
+		executionData.SignalExecution(uint(interval))
+		log.Infof("Executed job with interval %dmin", interval)
+	}).Methods("GET")
+	return &nhttp.Server{Addr: fmt.Sprintf(":%s", os.Getenv("TEST_PING_SERVER_PORT")), Handler: pingRouter}
+}
+
+func registerServer(ctx context.Context, t *testing.T, server *nhttp.Server) {
+	go func() {
+		if err := server.ListenAndServe(); err != nil {
+			if !errors.Is(err, nhttp.ErrServerClosed) {
+				t.Error(fmt.Errorf("error starting server: %w", err))
+			}
+		}
+	}()
+	t.Cleanup(func() {
+		timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		if err := server.Shutdown(timeoutCtx); err != nil {
+			t.Fatal(fmt.Errorf("error while shutting down sever: %w", err))
+		}
+	})
 }
 
 func expectErrorStatusCode(err error, errorStatusCode int, t *testing.T) {
@@ -223,7 +263,7 @@ func decodeResponse(response *nhttp.Response, v any) error {
 	return nil
 }
 
-func (ta *testApp) createJob(jobData *data.JobData) (model.JobId, error) {
+func (ta *testApp) createJob(jobData *data.JobRequestData) (model.JobId, error) {
 	jobDataJson, err := json.Marshal(jobData)
 	if err != nil {
 		return 0, fmt.Errorf("error marshalling job data: %w", err)
@@ -287,7 +327,7 @@ func (ta *testApp) deleteJob(id model.JobId) error {
 func (ta *testApp) createJobs(t *testing.T) {
 	for i := range data.InitialJobs {
 		job := &data.InitialJobs[i]
-		jobData := data.JobData{
+		jobData := data.JobRequestData{
 			Name:          job.Name,
 			CrontabString: job.CrontabString,
 			Command:       job.Command,
@@ -306,11 +346,11 @@ func (ta *testApp) setupApp(ctx context.Context, t *testing.T) {
 	ta.createJobs(t)
 }
 
-/*func resolveScriptPaths() {
+func resolveCommands() {
 	_, testFilename, _, _ := runtime.Caller(0)
 	scriptsDirectory := filepath.Join(filepath.Dir(testFilename), "test", "scripts")
 	for i := range data.InitialJobs {
 		scriptName := &data.InitialJobs[i].Command
-		*scriptName = filepath.Join(scriptsDirectory, *scriptName)
+		*scriptName = fmt.Sprintf("python %s", filepath.Join(scriptsDirectory, *scriptName))
 	}
-}*/
+}

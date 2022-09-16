@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-type JobData struct {
+type JobRequestData struct {
 	Name          string        `json:"name"`
 	CrontabString string        `json:"crontabString"`
 	Command       string        `json:"command"`
@@ -27,3 +27,6 @@ var InitialJobs = []model.Job{
 		250000000,
 	},
 }
+
+
+var JobIntervals = []uint{1, 2}

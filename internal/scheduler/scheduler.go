@@ -53,7 +53,7 @@ func (skd *Scheduler) startDueJobs(ctx context.Context) {
 					log.WithFields(log.Fields{
 						"error": err,
 						"job":   job,
-					}).Error("Error executing job")
+					}).Error("Error executing job") //FIXME: wrap errors
 				}
 
 				err = skd.storage.MarkJobDone(ctx, job)
