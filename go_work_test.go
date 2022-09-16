@@ -137,6 +137,7 @@ func TestGoWork(t *testing.T) {
 		t.Run("Test execution of initial jobs", func(t *testing.T) {
 			app.setupApp(background, t)
 			cancelCtx, cancel := context.WithCancel(background)
+			defer cancel()
 			go func() {
 				schd.Start(cancelCtx)
 			}()
@@ -144,9 +145,52 @@ func TestGoWork(t *testing.T) {
 			if err := executionData.ValidateExecutionData(); err != nil {
 				t.Fatal(fmt.Errorf("error validating execution of tasks: %w", err))
 			}
-			cancel()
+		})
+		t.Run("Test execution of initial jobs while modifying database", func(t *testing.T) {
+			app.setupApp(background, t)
+			cancelCtx, cancel := context.WithCancel(background)
+			defer cancel()
+			go func() {
+				schd.Start(cancelCtx)
+			}()
+			go func() {
+				app.alterDatabase(cancelCtx, t)
+			}()
+			time.Sleep(2*time.Duration(executionData.MaxInterval())*time.Minute + data.IntervalEps)
+			if err := executionData.ValidateExecutionData(); err != nil {
+				t.Fatal(fmt.Errorf("error validating execution of tasks: %w", err))
+			}
 		})
 	})
+}
+
+func (ta *testApp) alterDatabase(ctx context.Context, t *testing.T) {
+	createdJobData := data.JobRequestData{
+		Name:          "new_job",
+		CrontabString: "* * * 3 *",
+		Command:       "echo 1",
+		Timeout:       123000,
+	}
+	var id model.JobId
+	create := true
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+			var err error = nil
+			if create {
+				id, err = ta.createJob(&createdJobData)
+			} else {
+				err = ta.deleteJob(id)
+			}
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			create = !create
+		}
+	}
 }
 
 func getPingServer(executionData *data.ExecutionData) *nhttp.Server {
