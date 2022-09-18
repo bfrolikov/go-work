@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/lib/pq"
 	"github.com/robfig/cron/v3"
 	"go-work/internal/model/sqlquery"
 	"sync"
@@ -35,7 +36,7 @@ func NewSQLJobStorage(ctx context.Context, driverName, dataSourceName string) (*
 	return &storage, nil
 }
 
-func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, command string, timeout time.Duration) (JobId, error) {
+func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, command string, arguments []string, timeout uint) (JobId, error) {
 	schedule, err := cron.ParseStandard(crontabString)
 	if err != nil {
 		return 0, fmt.Errorf("failed parsing crontab string \"%s\" while creating job: %w", crontabString, err)
@@ -49,6 +50,7 @@ func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, com
 			name,
 			crontabString,
 			command,
+			pq.Array(arguments),
 			timeout,
 			schedule.Next(time.Now()),
 		).Scan(&id)
@@ -138,6 +140,7 @@ func scanJob(sc scanner, job *Job) error {
 		&job.Name,
 		&job.CrontabString,
 		&job.Command,
+		pq.Array(&job.Arguments),
 		&job.Timeout,
 	)
 }

@@ -26,7 +26,7 @@ func (eh *ErrorHandler) WriteAndLogError(
 	err error,
 	statusCode int,
 	fields log.Fields,
-) {
+) { //FIXME: dont give the user server errors
 	fields["endpoint"] = eh.endpoint
 	logErr := fmt.Errorf("%s: %w", msg, err)
 	responseErr := ""

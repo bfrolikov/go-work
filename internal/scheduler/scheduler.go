@@ -41,11 +41,11 @@ func (skd *Scheduler) startDueJobs(ctx context.Context) {
 			}
 
 			for _, job := range jobs {
-				timeoutCtx, cancel := context.WithTimeout(ctx, job.Timeout)
+				timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*time.Duration(job.Timeout))
 				log.WithFields(log.Fields{
 					"job": job,
 				}).Info("Executing job")
-				err = exec.CommandContext(timeoutCtx, job.Command).Run() //FIXME: add recover
+				err = exec.CommandContext(timeoutCtx, job.Command, job.Arguments...).Run() //FIXME: add recover and start in separate goroutine!!!
 				cancel()
 				if err != nil {
 					log.WithFields(log.Fields{

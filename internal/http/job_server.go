@@ -17,7 +17,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type jobServer struct {
@@ -43,10 +42,11 @@ var (
 )
 
 type requestJob struct {
-	Name          string        `json:"name" validate:"required,uniqueName"`
-	CrontabString string        `json:"crontabString" validate:"required,crontabString"`
-	Command       string        `json:"command" validate:"required"`
-	Timeout       time.Duration `json:"timeout" validate:"required"`
+	Name          string   `json:"name" validate:"required,uniqueName"`
+	CrontabString string   `json:"crontabString" validate:"required,crontabString"`
+	Command       string   `json:"command" validate:"required"`
+	Arguments     []string `json:"arguments"`
+	Timeout       uint     `json:"timeout" validate:"required"`
 }
 
 type responseId struct {
@@ -107,6 +107,7 @@ func (js *jobServer) createJobHandler(w http.ResponseWriter, req *http.Request) 
 		rj.Name,
 		rj.CrontabString,
 		rj.Command,
+		rj.Arguments,
 		rj.Timeout,
 	)
 	if err != nil {
