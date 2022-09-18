@@ -3,6 +3,7 @@ package validation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"github.com/go-playground/validator/v10"
 	"github.com/robfig/cron/v3"
 	"go-work/internal/http/constants"
@@ -20,7 +21,7 @@ func RegisterJobValidation(validate *validator.Validate, storage model.JobStorag
 		return false
 	})
 	if err != nil {
-		return err
+		return fmt.Errorf("failed registering the \"uniqueName\" validation tag: %w", err)
 	}
 
 	err = validate.RegisterValidation("crontabString", func(fl validator.FieldLevel) bool {
@@ -28,7 +29,7 @@ func RegisterJobValidation(validate *validator.Validate, storage model.JobStorag
 		return err == nil
 	})
 	if err != nil {
-		return err
+		err = fmt.Errorf("failed registering the \"crontabString\" validation tag: %w", err)
 	}
-	return nil
+	return err
 }

@@ -206,7 +206,7 @@ func NewJobServer(storage model.JobStorage, addr string) (*http.Server, error) {
 		return field.Name
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error registering job validation: %w", err)
 	}
 
 	router := mux.NewRouter()

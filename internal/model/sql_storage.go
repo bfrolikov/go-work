@@ -53,7 +53,7 @@ func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, com
 			schedule.Next(time.Now()),
 		).Scan(&id)
 		if err != nil {
-			err = fmt.Errorf("failed scanning job: %w", err)
+			err = fmt.Errorf("failed scanning job id: %w", err)
 		}
 		return err
 	}
@@ -152,7 +152,7 @@ func (st *sqlJobStorage) getJobBy(ctx context.Context, query string, params ...a
 		if errors.Is(err, sql.ErrNoRows) {
 			return Job{}, ErrorNotFound
 		}
-		return Job{}, err
+		return Job{}, fmt.Errorf("failed scanning job: %w", err)
 	}
 	return job, nil
 }
