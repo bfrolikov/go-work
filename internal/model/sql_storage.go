@@ -65,12 +65,12 @@ func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, com
 	return id, nil
 }
 
-func (st *sqlJobStorage) GetJob(ctx context.Context, id JobId) (Job, error) {
+func (st *sqlJobStorage) GetJob(ctx context.Context, id JobId) (*Job, error) {
 	job, err := st.getJobBy(ctx, sqlquery.GetJob, id)
 	if err != nil {
 		err = fmt.Errorf("failed getting job by id %d: %w", id, err)
 	}
-	return job, err
+	return &job, err
 }
 
 func (st *sqlJobStorage) DeleteJob(ctx context.Context, id JobId) error {
@@ -81,16 +81,16 @@ func (st *sqlJobStorage) DeleteJob(ctx context.Context, id JobId) error {
 	return err
 }
 
-func (st *sqlJobStorage) GetJobByName(ctx context.Context, name string) (Job, error) {
+func (st *sqlJobStorage) GetJobByName(ctx context.Context, name string) (*Job, error) {
 	job, err := st.getJobBy(ctx, sqlquery.GetJobByName, name)
 	if err != nil {
 		err = fmt.Errorf("failed getting job by name %s: %w", name, err)
 	}
-	return job, err
+	return &job, err
 }
 
-func (st *sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) {
-	jobs := make([]Job, 0)
+func (st *sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]*Job, error) {
+	jobs := make([]*Job, 0)
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, sqlquery.MarkDueJobsRunning, time.Now())
 		if err != nil {
@@ -104,7 +104,7 @@ func (st *sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) 
 			if err != nil {
 				return fmt.Errorf("failed scanning job: %w", err)
 			}
-			jobs = append(jobs, job)
+			jobs = append(jobs, &job)
 		}
 		return rows.Close()
 	}
@@ -115,7 +115,7 @@ func (st *sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) 
 	return jobs, nil
 }
 
-func (st *sqlJobStorage) MarkJobDone(ctx context.Context, job Job) error {
+func (st *sqlJobStorage) MarkJobDone(ctx context.Context, job *Job) error {
 	schedule, err := cron.ParseStandard(job.CrontabString)
 	if err != nil {
 		return fmt.Errorf("failed parsing crontab string %s while marking job done: %w", job.CrontabString, err)

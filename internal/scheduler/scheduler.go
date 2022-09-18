@@ -45,7 +45,7 @@ func (skd *Scheduler) startDueJobs(ctx context.Context) {
 				log.WithFields(log.Fields{
 					"job": job,
 				}).Info("Executing job")
-				err = exec.CommandContext(timeoutCtx, job.Command).Run()
+				err = exec.CommandContext(timeoutCtx, job.Command).Run() //FIXME: add recover
 				cancel()
 				if err != nil {
 					log.WithFields(log.Fields{
@@ -69,7 +69,7 @@ func (skd *Scheduler) monitorDone(ctx context.Context) {
 	for {
 		select {
 		case job := <-skd.doneChannel:
-			err := skd.storage.MarkJobDone(ctx, job)
+			err := skd.storage.MarkJobDone(ctx, &job)
 			if err != nil {
 				log.WithFields(log.Fields{
 					"job": job,
