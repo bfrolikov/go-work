@@ -118,6 +118,14 @@ components:
         command:
           type: string
           example: /home/user/me/check.sh
+        arguments:
+          type: array
+          items:
+            type: string
+          example:
+            - "-a"
+            - "--arg1"
+            - "--arg2=123"
         timeout:
           type: integer
           format: int64
