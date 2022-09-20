@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"github.com/lib/pq"
 	"github.com/robfig/cron/v3"
 	"go-work/internal/model/sqlquery"
 	"sync"
@@ -19,66 +20,83 @@ type sqlJobStorage struct {
 func NewSQLJobStorage(ctx context.Context, driverName, dataSourceName string) (*sqlJobStorage, error) {
 	database, err := sql.Open(driverName, dataSourceName)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed opening database: %w", err)
 	}
 
 	if err = database.PingContext(ctx); err != nil {
 		database.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed checking database availibility: %w", err)
 	}
 
 	storage := sqlJobStorage{database, &sync.RWMutex{}}
 	if err = storage.init(ctx); err != nil {
 		database.Close()
-		return nil, err
+		return nil, fmt.Errorf("failed initializing storage: %w", err)
 	}
 	return &storage, nil
 }
 
-func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, scriptPath string, timeout time.Duration) (JobId, error) {
+func (st *sqlJobStorage) CreateJob(ctx context.Context, name, crontabString, command string, arguments []string, timeout uint) (JobId, error) {
 	schedule, err := cron.ParseStandard(crontabString)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed parsing crontab string \"%s\" while creating job: %w", crontabString, err)
 	}
 
 	var id JobId
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
-		return tx.QueryRowContext(
+		err := tx.QueryRowContext(
 			ctx,
 			sqlquery.NewJob,
 			name,
 			crontabString,
-			scriptPath,
+			command,
+			pq.Array(arguments),
 			timeout,
 			schedule.Next(time.Now()),
 		).Scan(&id)
+		if err != nil {
+			err = fmt.Errorf("failed scanning job id: %w", err)
+		}
+		return err
 	}
 
 	if err = st.transact(ctx, transactionFunc); err != nil {
-		return 0, err
+		return 0, fmt.Errorf("failed creating job: %w", err)
 	}
 
 	return id, nil
 }
 
-func (st *sqlJobStorage) GetJob(ctx context.Context, id JobId) (Job, error) {
-	return st.getJobBy(ctx, sqlquery.GetJob, id)
+func (st *sqlJobStorage) GetJob(ctx context.Context, id JobId) (*Job, error) {
+	job, err := st.getJobBy(ctx, sqlquery.GetJob, id)
+	if err != nil {
+		err = fmt.Errorf("failed getting job by id %d: %w", id, err)
+	}
+	return &job, err
 }
 
 func (st *sqlJobStorage) DeleteJob(ctx context.Context, id JobId) error {
-	return st.updateJobs(ctx, sqlquery.DeleteJob, id)
+	err := st.updateJobs(ctx, sqlquery.DeleteJob, id)
+	if err != nil {
+		err = fmt.Errorf("failed deleting job with id %d: %w", id, err)
+	}
+	return err
 }
 
-func (st *sqlJobStorage) GetJobByName(ctx context.Context, name string) (Job, error) {
-	return st.getJobBy(ctx, sqlquery.GetJobByName, name)
+func (st *sqlJobStorage) GetJobByName(ctx context.Context, name string) (*Job, error) {
+	job, err := st.getJobBy(ctx, sqlquery.GetJobByName, name)
+	if err != nil {
+		err = fmt.Errorf("failed getting job by name %s: %w", name, err)
+	}
+	return &job, err
 }
 
-func (st *sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) {
-	jobs := make([]Job, 0)
+func (st *sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]*Job, error) {
+	jobs := make([]*Job, 0)
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
 		rows, err := tx.QueryContext(ctx, sqlquery.MarkDueJobsRunning, time.Now())
 		if err != nil {
-			return err
+			return fmt.Errorf("failed mark due jobs running query: %w", err)
 		}
 		defer rows.Close()
 
@@ -86,26 +104,30 @@ func (st *sqlJobStorage) MarkDueJobsRunning(ctx context.Context) ([]Job, error) 
 			job := Job{}
 			err := scanJob(rows, &job)
 			if err != nil {
-				return err
+				return fmt.Errorf("failed scanning job: %w", err)
 			}
-			jobs = append(jobs, job)
+			jobs = append(jobs, &job)
 		}
 		return rows.Close()
 	}
 
 	if err := st.transact(ctx, transactionFunc); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed marking due jobs running: %w", err)
 	}
 	return jobs, nil
 }
 
-func (st *sqlJobStorage) MarkJobDone(ctx context.Context, job Job) error {
+func (st *sqlJobStorage) MarkJobDone(ctx context.Context, job *Job) error {
 	schedule, err := cron.ParseStandard(job.CrontabString)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed parsing crontab string %s while marking job done: %w", job.CrontabString, err)
 	}
 
-	return st.updateJobs(ctx, sqlquery.MarkDone, schedule.Next(time.Now()), job.Id)
+	err = st.updateJobs(ctx, sqlquery.MarkDone, schedule.Next(time.Now()), job.Id)
+	if err != nil {
+		err = fmt.Errorf("failed marking job done: %w", err)
+	}
+	return err
 }
 
 type scanner interface {
@@ -117,7 +139,8 @@ func scanJob(sc scanner, job *Job) error {
 		&job.Id,
 		&job.Name,
 		&job.CrontabString,
-		&job.ScriptPath,
+		&job.Command,
+		pq.Array(&job.Arguments),
 		&job.Timeout,
 	)
 }
@@ -132,7 +155,7 @@ func (st *sqlJobStorage) getJobBy(ctx context.Context, query string, params ...a
 		if errors.Is(err, sql.ErrNoRows) {
 			return Job{}, ErrorNotFound
 		}
-		return Job{}, fmt.Errorf("failed getting job: %w", err)
+		return Job{}, fmt.Errorf("failed scanning job: %w", err)
 	}
 	return job, nil
 }
@@ -166,13 +189,13 @@ func (st *sqlJobStorage) init(ctx context.Context) error {
 	transactionFunc := func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, sqlquery.ResetState)
 		if err != nil {
-			return err
+			return fmt.Errorf("error resetting storage state: %w", err)
 		}
 
 		for {
 			rows, err := tx.QueryContext(ctx, sqlquery.FindNullNextExecutionTime)
 			if err != nil {
-				return err
+				return fmt.Errorf("error finding jobs with null next execution time: %w", err)
 			}
 			if !rows.Next() {
 				break
@@ -191,7 +214,7 @@ func (st *sqlJobStorage) init(ctx context.Context) error {
 			}
 			closeError := rows.Close()
 			if err = rows.Err(); err != nil {
-				return err
+				return fmt.Errorf("error scanning jobs: %w", err)
 			}
 			if closeError != nil {
 				return closeError
@@ -200,11 +223,11 @@ func (st *sqlJobStorage) init(ctx context.Context) error {
 			for _, job := range jobs {
 				schedule, err := cron.ParseStandard(job.CrontabString)
 				if err != nil {
-					return err
+					return fmt.Errorf("error parsing crontab string %s: %w", job.CrontabString, err)
 				}
 				_, err = tx.ExecContext(ctx, sqlquery.SetNextExecutionTime, schedule.Next(time.Now()), job.Id)
 				if err != nil {
-					return err
+					return fmt.Errorf("error setting next execution time for job with id %d: %w", job.Id, err)
 				}
 			}
 		}

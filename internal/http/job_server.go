@@ -17,7 +17,6 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
-	"time"
 )
 
 type jobServer struct {
@@ -43,10 +42,11 @@ var (
 )
 
 type requestJob struct {
-	Name          string        `json:"name" validate:"required,uniqueName"`
-	CrontabString string        `json:"crontabString" validate:"required,crontabString"`
-	ScriptPath    string        `json:"scriptPath" validate:"required,file"`
-	Timeout       time.Duration `json:"timeout" validate:"required"`
+	Name          string   `json:"name" validate:"required,uniqueName"`
+	CrontabString string   `json:"crontabString" validate:"required,crontabString"`
+	Command       string   `json:"command" validate:"required"`
+	Arguments     []string `json:"arguments"`
+	Timeout       uint     `json:"timeout" validate:"required"`
 }
 
 type responseId struct {
@@ -67,9 +67,10 @@ func (js *jobServer) createJobHandler(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	if mediaType != "application/json" {
-		createJobErrorHandler.WriteAndLogErrorMsg(
+		createJobErrorHandler.WriteAndLogError(
 			w,
 			"expect application/json Content-Type",
+			errors.New("Content-Type error"),
 			http.StatusUnsupportedMediaType,
 			log.Fields{"media type": mediaType},
 		)
@@ -106,7 +107,8 @@ func (js *jobServer) createJobHandler(w http.ResponseWriter, req *http.Request) 
 		timeoutCtx,
 		rj.Name,
 		rj.CrontabString,
-		rj.ScriptPath,
+		rj.Command,
+		rj.Arguments,
 		rj.Timeout,
 	)
 	if err != nil {
@@ -206,7 +208,7 @@ func NewJobServer(storage model.JobStorage, addr string) (*http.Server, error) {
 		return field.Name
 	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error registering job validation: %w", err)
 	}
 
 	router := mux.NewRouter()
@@ -214,7 +216,7 @@ func NewJobServer(storage model.JobStorage, addr string) (*http.Server, error) {
 	router.HandleFunc("/api/v1/job/", server.createJobHandler).Methods("POST")
 	router.HandleFunc("/api/v1/job/{id:[0-9]+}/", server.getJobHandler).Methods("GET")
 	router.HandleFunc("/api/v1/job/{id:[0-9]+}/", server.deleteJobHandler).Methods("DELETE")
-	router.HandleFunc("/api/v1/job/{name:[a-zA-Z0-9]+}/", server.getJobByNameHandler).Methods("GET")
+	router.HandleFunc("/api/v1/job/{name:[a-zA-Z_]\\w*}/", server.getJobByNameHandler).Methods("GET")
 	router.Use(loggingMiddleware)
 	router.StrictSlash(true)
 	return &http.Server{Addr: addr, Handler: router}, nil

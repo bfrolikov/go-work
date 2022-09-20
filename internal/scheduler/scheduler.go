@@ -37,32 +37,35 @@ func (skd *Scheduler) startDueJobs(ctx context.Context) {
 		case <-time.After(skd.pingInterval):
 			jobs, err := skd.storage.MarkDueJobsRunning(ctx)
 			if err != nil {
-				log.WithFields(log.Fields{
-					"error": err,
-				}).Error("Error marking due jobs running")
+				log.Errorf("Error marking due jobs running: %s", err)
 			}
 
 			for _, job := range jobs {
-				timeoutCtx, cancel := context.WithTimeout(ctx, job.Timeout)
-				log.WithFields(log.Fields{
-					"job": job,
-				}).Info("Executing job")
-				err = exec.CommandContext(timeoutCtx, job.ScriptPath).Run()
-				cancel()
-				if err != nil {
-					log.WithFields(log.Fields{
-						"error": err,
-						"job":   job,
-					}).Error("Error executing job")
-				}
+				go func(job *model.Job) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							log.Errorf("Panic while executing job: %s", rec)
+						}
+					}()
 
-				err = skd.storage.MarkJobDone(ctx, job)
-				if err != nil {
+					timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*time.Duration(job.Timeout))
 					log.WithFields(log.Fields{
-						"error": err,
-						"job":   job,
-					}).Error("Error marking job done")
-				}
+						"job": job,
+					}).Info("Executing job")
+					err = exec.CommandContext(timeoutCtx, job.Command, job.Arguments...).Run()
+					cancel()
+					if err != nil {
+						log.WithFields(log.Fields{
+							"job": job,
+						}).Errorf("Error executing job: %s", err)
+					}
+					err = skd.storage.MarkJobDone(ctx, job)
+					if err != nil {
+						log.WithFields(log.Fields{
+							"job": job,
+						}).Errorf("Error marking job done: %s", err)
+					}
+				}(job)
 			}
 		}
 	}
@@ -73,12 +76,11 @@ func (skd *Scheduler) monitorDone(ctx context.Context) {
 	for {
 		select {
 		case job := <-skd.doneChannel:
-			err := skd.storage.MarkJobDone(ctx, job)
+			err := skd.storage.MarkJobDone(ctx, &job)
 			if err != nil {
 				log.WithFields(log.Fields{
-					"error": err,
-					"job":   job,
-				}).Error("Error signaling completion of job")
+					"job": job,
+				}).Errorf("Error signaling completion of job: %s", err)
 			}
 		case <-ctx.Done():
 			return

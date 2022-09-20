@@ -18,7 +18,7 @@ import (
 
 type Options struct {
 	ServerPort uint   `long:"server-port" description:"Port for server to listen on" default:"8080"`
-	DbHost     string `long:"db-url" description:"Database host url" required:"true"`
+	DbHost     string `long:"db-host" description:"Database host url" required:"true"`
 	DbPort     uint   `long:"db-port" description:"Database port" default:"5432"`
 	DbUser     string `long:"db-login" description:"Database user login" required:"true"`
 	DbName     string `long:"db-name" description:"Database name" required:"true"`
@@ -31,9 +31,9 @@ func main() {
 	opts := Options{}
 	_, err := flags.Parse(&opts)
 	if err != nil {
-		log.Fatal(fmt.Errorf("could not parse command line args: %w", err))
+		log.Fatalf("Could not parse command line args: %s", err)
 	}
-	datasourceName := fmt.Sprintf(
+	dataSourceName := fmt.Sprintf(
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 		opts.DbHost,
 		opts.DbPort,
@@ -43,19 +43,19 @@ func main() {
 	)
 	background := context.Background()
 	var storage model.JobStorage
-	storage, err = model.NewSQLJobStorage(background, "postgres", datasourceName)
+	storage, err = model.NewSQLJobStorage(background, "postgres", dataSourceName)
 	if err != nil {
-		log.Fatal(fmt.Errorf("could not create job storage: %w", err))
+		log.Fatalf("Could not create job storage: %s", err)
 	}
 	server, err := http.NewJobServer(storage, fmt.Sprintf(":%d", opts.ServerPort))
 	if err != nil {
-		log.Fatal(fmt.Errorf("could not create job server: %w", err))
+		log.Fatalf("Could not create job server: %s", err)
 	}
 	cancelCtx, cancel := context.WithCancel(background)
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 	wg := sync.WaitGroup{}
-	wg.Add(len(opts.Intervals) + 1)
+	wg.Add(len(opts.Intervals))
 	for _, interval := range opts.Intervals {
 		go func(interval uint) {
 			defer wg.Done()
@@ -63,9 +63,8 @@ func main() {
 		}(interval)
 	}
 	go func() {
-		defer wg.Done()
 		if err := server.ListenAndServe(); err != nil {
-			log.Error(fmt.Errorf("listen and serve error: %w", err))
+			log.Errorf("Listen and serve error: %s", err)
 		}
 	}()
 	<-sigs
@@ -73,7 +72,7 @@ func main() {
 	timeoutCtx, timeoutCancel := context.WithTimeout(background, serverShutdownTimeout)
 	defer timeoutCancel()
 	if err = server.Shutdown(timeoutCtx); err != nil {
-		log.Error(fmt.Errorf("failed to shutdown server: %w", err))
+		log.Errorf("Failed to shutdown server: %s", err)
 	}
 	wg.Wait()
 }
