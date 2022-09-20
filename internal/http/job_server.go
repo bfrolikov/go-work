@@ -67,9 +67,10 @@ func (js *jobServer) createJobHandler(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 	if mediaType != "application/json" {
-		createJobErrorHandler.WriteAndLogErrorMsg(
+		createJobErrorHandler.WriteAndLogError(
 			w,
 			"expect application/json Content-Type",
+			errors.New("Content-Type error"),
 			http.StatusUnsupportedMediaType,
 			log.Fields{"media type": mediaType},
 		)

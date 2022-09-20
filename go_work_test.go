@@ -35,7 +35,7 @@ const timeout = time.Second * 15
 var deleteAllJobsQuery = "DELETE from jobs"
 
 func TestGoWork(t *testing.T) {
-	resolveCommands()
+	resolveArguments()
 	background := context.Background()
 	dataSourceName := fmt.Sprintf(
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
@@ -107,6 +107,7 @@ func TestGoWork(t *testing.T) {
 				Name:          existingJob.Name,
 				CrontabString: existingJob.CrontabString,
 				Command:       existingJob.Command,
+				Arguments:     existingJob.Arguments,
 				Timeout:       existingJob.Timeout,
 			}
 			_, err := app.createJob(background, &existingJobData)
@@ -127,16 +128,16 @@ func TestGoWork(t *testing.T) {
 		})
 	})
 
-	schd := scheduler.New(storage, 1)
 	executionData := data.NewExecutionData()
 
 	registerServer(background, t, getPingServer(executionData))
-	log.SetLevel(log.ErrorLevel)
+	//log.SetLevel(log.ErrorLevel)
 	t.Run("Test job execution", func(t *testing.T) {
 		t.Run("Test execution of initial jobs", func(t *testing.T) {
 			app.setupApp(background, t)
 			cancelCtx, cancel := context.WithCancel(background)
 			defer cancel()
+			schd := scheduler.New(storage, 1)
 			go func() {
 				schd.Start(cancelCtx)
 			}()
@@ -149,6 +150,7 @@ func TestGoWork(t *testing.T) {
 			app.setupApp(background, t)
 			cancelCtx, cancel := context.WithCancel(background)
 			defer cancel()
+			schd := scheduler.New(storage, 1)
 			go func() {
 				schd.Start(cancelCtx)
 			}()
@@ -167,7 +169,7 @@ func (ta *testApp) alterDatabase(ctx context.Context, t *testing.T) {
 	createdJobData := data.JobRequestData{
 		Name:          "new_job",
 		CrontabString: "* * * 3 *",
-		Command:       "echo 1",
+		Command:       "pass",
 		Timeout:       123000,
 	}
 	var id model.JobId
@@ -342,8 +344,8 @@ func (ta *testApp) getJob(ctx context.Context, url string) (*model.Job, error) {
 	defer cancel()
 	getJobRequest, _ := nhttp.NewRequestWithContext(
 		timeoutCtx,
-		url,
 		"GET",
+		url,
 		nil,
 	)
 
@@ -395,6 +397,7 @@ func (ta *testApp) createJobs(ctx context.Context, t *testing.T) {
 			Name:          job.Name,
 			CrontabString: job.CrontabString,
 			Command:       job.Command,
+			Arguments:     job.Arguments,
 			Timeout:       job.Timeout,
 		}
 		id, err := ta.createJob(ctx, &jobData)
@@ -410,11 +413,11 @@ func (ta *testApp) setupApp(ctx context.Context, t *testing.T) {
 	ta.createJobs(ctx, t)
 }
 
-func resolveCommands() {
+func resolveArguments() {
 	_, testFilename, _, _ := runtime.Caller(0)
 	scriptsDirectory := filepath.Join(filepath.Dir(testFilename), "test", "scripts")
 	for i := range data.InitialJobs {
-		scriptName := &data.InitialJobs[i].Command
-		*scriptName = fmt.Sprintf("python %s", filepath.Join(scriptsDirectory, *scriptName))
+		scriptName := &data.InitialJobs[i].Arguments[0]
+		*scriptName = filepath.Join(scriptsDirectory, *scriptName)
 	}
 }

@@ -22,37 +22,19 @@ func NewErrorHandler(endpoint string) *ErrorHandler {
 
 func (eh *ErrorHandler) WriteAndLogError(
 	w http.ResponseWriter,
-	msg string,
+	message string,
 	err error,
-	statusCode int,
-	fields log.Fields,
-) { //FIXME: dont give the user server errors
-	fields["endpoint"] = eh.endpoint
-	logErr := fmt.Errorf("%s: %w", msg, err)
-	responseErr := ""
-	if statusCode >= 500 {
-		log.WithFields(fields).Error(logErr)
-		responseErr = msg
-	} else {
-		log.WithFields(fields).Debug(logErr)
-		responseErr = logErr.Error()
-	}
-	eh.writeJsonErrorMsg(w, responseErr, statusCode)
-}
-
-func (eh *ErrorHandler) WriteAndLogErrorMsg(
-	w http.ResponseWriter,
-	msg string,
 	statusCode int,
 	fields log.Fields,
 ) {
 	fields["endpoint"] = eh.endpoint
+	logErr := fmt.Sprintf("%s: %s", message, err)
 	if statusCode >= 500 {
-		log.WithFields(fields).Error(msg)
+		log.WithFields(fields).Error(logErr)
 	} else {
-		log.WithFields(fields).Debug(msg)
+		log.WithFields(fields).Debug(logErr)
 	}
-	eh.writeJsonErrorMsg(w, msg, statusCode)
+	eh.writeJsonErrorMsg(w, message, statusCode)
 }
 
 func (eh *ErrorHandler) WriteAndLogValidationErrors(
@@ -65,8 +47,8 @@ func (eh *ErrorHandler) WriteAndLogValidationErrors(
 	for _, fieldError := range err {
 		fieldErrors[fieldError.Field()] = fieldError.Error()
 	}
+	log.WithFields(fields).Debugf("Received json with invalid fields: %s", fieldErrors)
 	fields["field errors"] = fieldErrors
-	log.WithFields(fields).Debug("Received invalid data")
 	resp, _ := json.Marshal(fieldErrors)
 	eh.writeJson(w, resp, http.StatusUnprocessableEntity)
 }

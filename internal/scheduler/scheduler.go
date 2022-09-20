@@ -41,24 +41,31 @@ func (skd *Scheduler) startDueJobs(ctx context.Context) {
 			}
 
 			for _, job := range jobs {
-				timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*time.Duration(job.Timeout))
-				log.WithFields(log.Fields{
-					"job": job,
-				}).Info("Executing job")
-				err = exec.CommandContext(timeoutCtx, job.Command, job.Arguments...).Run() //FIXME: add recover and start in separate goroutine!!!
-				cancel()
-				if err != nil {
-					log.WithFields(log.Fields{
-						"job": job,
-					}).Errorf("Error executing job: %s", err)
-				}
+				go func(job *model.Job) {
+					defer func() {
+						if rec := recover(); rec != nil {
+							log.Errorf("Panic while executing job: %s", rec)
+						}
+					}()
 
-				err = skd.storage.MarkJobDone(ctx, job)
-				if err != nil {
+					timeoutCtx, cancel := context.WithTimeout(ctx, time.Second*time.Duration(job.Timeout))
 					log.WithFields(log.Fields{
 						"job": job,
-					}).Errorf("Error marking job done: %s", err)
-				}
+					}).Info("Executing job")
+					err = exec.CommandContext(timeoutCtx, job.Command, job.Arguments...).Run()
+					cancel()
+					if err != nil {
+						log.WithFields(log.Fields{
+							"job": job,
+						}).Errorf("Error executing job: %s", err)
+					}
+					err = skd.storage.MarkJobDone(ctx, job)
+					if err != nil {
+						log.WithFields(log.Fields{
+							"job": job,
+						}).Errorf("Error marking job done: %s", err)
+					}
+				}(job)
 			}
 		}
 	}
