@@ -10,6 +10,6 @@
 - [x] Command line interface for starting and stopping the app
 - [x] RESTful web interface for adding/removing/listing jobs
 - [x] OpenAPI 3.0 specification
-- [X] Testing
-- [X] Dockerfile and docker-compose.yml
+- [ ] Testing
+- [ ] Dockerfile and docker-compose.yml
 - [ ] CI/CD before merging into `master`
