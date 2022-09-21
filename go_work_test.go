@@ -41,9 +41,9 @@ func TestGoWork(t *testing.T) {
 		"host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		os.Getenv("TEST_DB_HOST"),
 		os.Getenv("TEST_DB_PORT"),
-		"go-work",
+		os.Getenv("TEST_DB_USER"),
 		os.Getenv("TEST_DB_PASSWORD"),
-		"go-work",
+		os.Getenv("TEST_DB_NAME"),
 	)
 	database, err := sql.Open("postgres", dataSourceName)
 	if err != nil {
