@@ -38,7 +38,7 @@ func main() {
 		opts.DbHost,
 		opts.DbPort,
 		opts.DbUser,
-		os.Getenv("POSTGRES_PASSWORD"),
+		os.Getenv("POSTGRES_APP_PASSWORD"),
 		opts.DbName,
 	)
 	background := context.Background()
