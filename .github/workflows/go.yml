@@ -25,7 +25,7 @@ jobs:
         run: go build -v cmd/go-work/main.go
 
       - name: Start environment
-        run: docker compose up -d
+        run: docker compose -f docker-compose-environment-only.yml up -d
         env:
           POSTGRES_ADMIN_PASSWORD: admin_password
           POSTGRES_APP_PASSWORD: app_password
