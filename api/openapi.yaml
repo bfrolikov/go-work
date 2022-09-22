@@ -129,8 +129,8 @@ components:
         timeout:
           type: integer
           format: int64
-          example: 60000000
-          description: Timeout in nanoseconds
+          example: 6
+          description: Timeout in seconds
       required:
         - id
         - name
@@ -153,8 +153,8 @@ components:
         timeout:
           type: integer
           format: int64
-          example: 60000000
-          description: Timeout in nanoseconds
+          example: 6
+          description: Timeout in seconds
       required:
         - name
         - crontabString

@@ -18,4 +18,8 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
     ALTER TABLE IF EXISTS public.jobs
         OWNER to "$POSTGRES_USER";
     GRANT SELECT, UPDATE, INSERT, DELETE ON public.jobs TO "go-work";
+
+    CREATE INDEX jobs_nextexecutiontime_idx
+        ON public.jobs USING btree
+        (nextexecutiontime ASC NULLS LAST)
 EOSQL
