@@ -72,7 +72,7 @@ Here's an example of a job definition (JSON):
 }
 ```
 
-The important fields are:
+The fields are:
 
 * `name` - Name of the job, a valid identifier (**starts with a letter, cannot contain spaces**, can include letters,
   numbers and underscores)
