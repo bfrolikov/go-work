@@ -18,14 +18,15 @@ import (
 
 type Options struct {
 	ServerPort uint   `long:"server-port" description:"Port for server to listen on" default:"8080"`
-	DbHost     string `long:"db-host" description:"Database host url" required:"true"`
+	DbHost     string `long:"db-host" description:"Database host" required:"true"`
 	DbPort     uint   `long:"db-port" description:"Database port" default:"5432"`
-	DbUser     string `long:"db-login" description:"Database user login" required:"true"`
-	DbName     string `long:"db-name" description:"Database name" required:"true"`
 	Intervals  []uint `long:"interval" description:"Query intervals for schedulers" required:"true"`
 }
 
-const serverShutdownTimeout = 30 * time.Second
+const (
+	serverShutdownTimeout = 30 * time.Second
+	appName               = "go-work"
+)
 
 func main() {
 	opts := Options{}
@@ -37,9 +38,9 @@ func main() {
 		"host=%s port=%d user=%s password=%s dbname=%s sslmode=disable",
 		opts.DbHost,
 		opts.DbPort,
-		opts.DbUser,
+		appName,
 		os.Getenv("POSTGRES_APP_PASSWORD"),
-		opts.DbName,
+		appName,
 	)
 	background := context.Background()
 	var storage model.JobStorage
