@@ -60,7 +60,6 @@ Here's an example of a job definition (JSON):
 
 ```json
 {
-  "id": 10,
   "name": "example_job",
   "crontabString": "15 16 1 */3 *",
   "command": "/home/user/me/check.sh",
