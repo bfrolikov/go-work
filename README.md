@@ -82,4 +82,4 @@ The fields are:
 * `arguments` - An array of arguments passed to the command. This field is **optional**
 * `timeout` - Timeout in seconds, after which the job is terminated
 
-The app has a RESTful api for working with jobs. See the OpenAPI v3 specification in `api/openapi.yml`
+The app has a RESTful api for working with jobs. See the OpenAPI v3 specification in `api/openapi.yaml`
